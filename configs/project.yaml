@@ -1,0 +1,33 @@
+project:
+  name: realistic-bfcl
+  goal: realism-controlled metamorphic benchmark layer over BFCL
+
+bfcl:
+  dataset_commit: TODO_PIN_BEFORE_GENERATION
+  evaluator_version: TODO_PIN_BEFORE_BASELINE
+  upstream_repository: https://github.com/ShishirPatil/gorilla
+  clean_subset_config: configs/subsets/smoke.yaml
+
+evaluation:
+  paired_design: true
+  clean_first_required: true
+  models:
+    - TODO_MODEL_LIST
+  outputs:
+    clean_results: artifacts/results/clean/
+    noisy_results: artifacts/results/noisy/
+    paired_analysis: artifacts/analysis/
+
+generation:
+  accepted_dimensions:
+    - conversational_overhang
+    - incremental_slot_revelation
+  rejected_by_default:
+    - adversarial_word_games
+    - random_typos_without_human_plausibility
+    - transformations_that_change_oracle_without_a_repair_rule
+    - prompts_that_add_or_remove_required_constraints
+
+review:
+  automatic_invariants_required: true
+  manual_or_llm_audit_required_before_release: true
