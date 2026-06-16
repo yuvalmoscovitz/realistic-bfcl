@@ -2,10 +2,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from pathlib import Path
-
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -37,28 +33,36 @@ STAGES: tuple[Stage, ...] = (
         purpose="Generate realistic irrelevant conversational context around clean requests.",
         inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
         outputs=("artifacts/generated/conversational_overhang.jsonl",),
-        next_action="Implement the conversational overhang generator with oracle-preservation metadata.",
+        next_action=(
+            "Implement the conversational overhang generator with oracle-preservation metadata."
+        ),
     ),
     Stage(
         name="augment-incremental",
         purpose="Split clean requests across natural multi-turn slot revelation.",
         inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
         outputs=("artifacts/generated/incremental_slot_revelation.jsonl",),
-        next_action="Implement multi-turn prompt construction without changing the final oracle.",
+        next_action=(
+            "Implement multi-turn prompt construction without changing the final oracle."
+        ),
     ),
     Stage(
         name="verify-noisy",
         purpose="Run invariant checks and realism audit before evaluation.",
         inputs=("artifacts/generated/",),
         outputs=("artifacts/audits/noisy_examples_audit.jsonl", "artifacts/accepted/"),
-        next_action="Add deterministic schema and oracle checks, then attach human or LLM audit labels.",
+        next_action=(
+            "Add deterministic schema and oracle checks, then attach human or LLM audit labels."
+        ),
     ),
     Stage(
         name="paired-eval",
         purpose="Evaluate clean and noisy variants with identical models and schemas.",
         inputs=("artifacts/results/clean/", "artifacts/accepted/"),
         outputs=("artifacts/results/noisy/", "artifacts/results/paired/"),
-        next_action="Run the evaluator for each accepted noisy variant and join results to clean runs.",
+        next_action=(
+            "Run the evaluator for each accepted noisy variant and join results to clean runs."
+        ),
     ),
     Stage(
         name="analyze",
@@ -72,7 +76,9 @@ STAGES: tuple[Stage, ...] = (
         purpose="Ablate simple defenses against realistic conversational noise.",
         inputs=("artifacts/accepted/", "artifacts/results/paired/"),
         outputs=("artifacts/analysis/defense_ablations/"),
-        next_action="Run denoising, stricter tool-use instructions, schema variants, and decoding variants.",
+        next_action=(
+            "Run denoising, stricter tool-use instructions, schema variants, and decoding variants."
+        ),
     ),
 )
 
@@ -116,7 +122,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Realistic-BFCL research stages.")
     parser.add_argument("stage", nargs="?", help="Stage name to inspect or run.")
     parser.add_argument("--list", action="store_true", help="List available stages.")
-    parser.add_argument("--dry-run", action="store_true", help="Describe the stage without running it.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Describe the stage without running it.",
+    )
     return parser
 
 

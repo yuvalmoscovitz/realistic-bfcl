@@ -1,10 +1,13 @@
-.PHONY: status freeze-bfcl clean-baseline augment-overhang augment-incremental verify-noisy paired-eval analyze defenses
+.PHONY: status lint freeze-bfcl clean-baseline augment-overhang augment-incremental verify-noisy paired-eval analyze defenses
 
 PYTHON ?= python
 RUN_STAGE = $(PYTHON) scripts/run_stage.py
 
 status:
 	$(RUN_STAGE) --list
+
+lint:
+	$(PYTHON) -m ruff check .
 
 freeze-bfcl:
 	$(RUN_STAGE) freeze-bfcl

@@ -53,6 +53,7 @@ is implemented.
 
 ```bash
 make status
+make lint
 make freeze-bfcl
 make clean-baseline
 make augment-overhang

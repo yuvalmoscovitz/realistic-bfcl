@@ -10,8 +10,26 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 
+[project.optional-dependencies]
+dev = ["ruff>=0.8"]
+
 [project.scripts]
 realistic-bfcl = "realistic_bfcl.pipeline:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["scripts", "src"]
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/run_stage.py" = ["E402", "I001"]
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
