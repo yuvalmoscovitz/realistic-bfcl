@@ -11,8 +11,7 @@ bfcl:
 evaluation:
   paired_design: true
   clean_first_required: true
-  models:
-    - TODO_MODEL_LIST
+  models: []
   outputs:
     clean_results: artifacts/results/clean/
     noisy_results: artifacts/results/noisy/

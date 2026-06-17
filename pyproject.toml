@@ -13,9 +13,6 @@ license = { text = "MIT" }
 [project.optional-dependencies]
 dev = ["ruff>=0.8"]
 
-[project.scripts]
-realistic-bfcl = "realistic_bfcl.pipeline:main"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 

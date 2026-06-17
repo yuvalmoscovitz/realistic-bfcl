@@ -24,10 +24,10 @@ class Stage:
 STAGES: tuple[Stage, ...] = (
     Stage(
         name="freeze-bfcl",
-        purpose="Pin BFCL dataset, evaluator, model list, and clean subset.",
+        purpose="Pin BFCL source metadata and local subset configuration.",
         inputs=("configs/project.yaml", "configs/subsets/smoke.yaml"),
         outputs=("artifacts/frozen/bfcl_manifest.json",),
-        next_action="Download BFCL, record immutable commits, and write a clean subset manifest.",
+        next_action="Materialize the configured subset from the pinned BFCL commit.",
     ),
     Stage(
         name="clean-baseline",
@@ -120,6 +120,23 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def read_int_setting(path: Path, key: str) -> int:
+    prefix = f"{key}:"
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith(prefix):
+            return int(line.split(":", 1)[1].strip())
+    raise SystemExit(f"Missing required setting '{key}' in {path.relative_to(REPO_ROOT)}")
+
+
+def reject_placeholders(paths: tuple[Path, ...]) -> None:
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        if "TODO" in text:
+            raise SystemExit(
+                f"Refusing to freeze with TODO placeholders in {path.relative_to(REPO_ROOT)}"
+            )
+
+
 def write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -133,6 +150,7 @@ def freeze_bfcl() -> None:
     project_config = REPO_ROOT / "configs/project.yaml"
     subset_config = REPO_ROOT / "configs/subsets/smoke.yaml"
     manifest_path = REPO_ROOT / "artifacts/frozen/bfcl_manifest.json"
+    reject_placeholders((project_config, subset_config))
 
     write_json(
         manifest_path,
@@ -146,15 +164,20 @@ def freeze_bfcl() -> None:
             "clean_subset": {
                 "config_path": "configs/subsets/smoke.yaml",
                 "config_sha256": file_sha256(subset_config),
-                "max_examples": 50,
-                "status": "defined_not_materialized",
+                "max_examples": read_int_setting(subset_config, "max_examples"),
+                "status": "configured_not_materialized",
             },
             "local_configs": {
                 "project_yaml_sha256": file_sha256(project_config),
                 "subset_yaml_sha256": file_sha256(subset_config),
             },
+            "model_list": {
+                "status": "not_configured",
+                "models": [],
+            },
+            "status": "source_pinned_subset_pending",
             "notes": [
-                "This freezes the BFCL upstream commit and local subset definition.",
+                "This pins the BFCL upstream commit and hashes the local subset definition.",
                 "The subset examples still need to be materialized from BFCL before "
                 "model evaluation.",
             ],
