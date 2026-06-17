@@ -483,25 +483,32 @@ def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
     return totals
 
 
-OVERHANG_PREFIXES = (
-    "I'm sorting through a few unrelated tasks, but the actual thing I need is this: ",
-    "Quick one while I have a bunch of other notes open: ",
-    "Ignore the surrounding context here; for the real request, ",
-    "I was looking at something else a minute ago, but now I need you to handle this: ",
+OVERHANG_TEMPLATES = (
+    "hey quick one - {prompt}",
+    "before i forget, {prompt}",
+    "can you help me with this? {prompt}",
+    "sorry, different topic for a sec: {prompt}",
+    "i'm updating some notes and need this too: {prompt}",
+    "ok while i'm here, {prompt}",
+    "my notes are kind of all over the place. {prompt}",
+    "one more thing: {prompt}",
+    "btw {prompt}",
+    "{prompt} thanks",
+    "{prompt} - trying to finish this before my next meeting",
+    "{prompt} if that makes sense",
 )
 
-OVERHANG_SUFFIXES = (
-    " That's the only action I need.",
-    " No need to use the other context.",
-    " Please just focus on that request.",
-    " Everything else here is irrelevant.",
-)
+
+def lowercase_first_alpha(text: str) -> str:
+    for index, char in enumerate(text):
+        if char.isalpha():
+            return f"{text[:index]}{char.lower()}{text[index + 1 :]}"
+    return text
 
 
 def overhang_prompt(clean_prompt: str, index: int) -> str:
-    prefix = OVERHANG_PREFIXES[index % len(OVERHANG_PREFIXES)]
-    suffix = OVERHANG_SUFFIXES[(index // len(OVERHANG_PREFIXES)) % len(OVERHANG_SUFFIXES)]
-    return f"{prefix}{clean_prompt}{suffix}"
+    template = OVERHANG_TEMPLATES[index % len(OVERHANG_TEMPLATES)]
+    return template.format(prompt=lowercase_first_alpha(clean_prompt))
 
 
 def overhang_messages(question: object, index: int) -> object:
