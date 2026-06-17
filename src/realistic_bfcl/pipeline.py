@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import re
+import sys
+import types
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -243,6 +246,19 @@ def bfcl_data_root() -> Path:
     )
 
 
+def bfcl_eval_root() -> Path:
+    root = os.environ.get("REALISTIC_BFCL_BFCL_ROOT")
+    if root:
+        return Path(root) / "berkeley-function-call-leaderboard"
+    default_root = Path("/tmp/gorilla-bfcl-inspect/berkeley-function-call-leaderboard")
+    if default_root.exists():
+        return default_root
+    raise SystemExit(
+        "Set REALISTIC_BFCL_BFCL_ROOT to a checkout of "
+        "https://github.com/ShishirPatil/gorilla at the pinned commit."
+    )
+
+
 def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
     categories = read_list_setting(subset_config, "bfcl_categories")
     max_examples = read_int_setting(subset_config, "max_examples")
@@ -369,31 +385,43 @@ def response_function_calls(
     return calls
 
 
-def matches_ground_truth(
-    calls: list[dict[str, object]], ground_truth: list[dict[str, object]]
-) -> bool:
-    if len(calls) != len(ground_truth):
-        return False
+def load_bfcl_ast_checker() -> tuple[object, object]:
+    eval_root = str(bfcl_eval_root())
+    if eval_root not in sys.path:
+        sys.path.insert(0, eval_root)
 
-    for call, expected_call in zip(calls, ground_truth):
-        if len(expected_call) != 1:
-            return False
-        expected_name, expected_args = next(iter(expected_call.items()))
-        actual_args = call.get("arguments", {})
-        if call.get("name") != expected_name or not isinstance(actual_args, dict):
-            return False
+    # ast_checker only needs this mapping for dot/underscore function-name conversion.
+    # Importing the full upstream model registry pulls every provider SDK.
+    if "bfcl_eval.constants.model_config" not in sys.modules:
+        model_config = types.ModuleType("bfcl_eval.constants.model_config")
+        model_config.MODEL_CONFIG_MAPPING = {
+            OPENAI_MODEL: types.SimpleNamespace(underscore_to_dot=False)
+        }
+        sys.modules["bfcl_eval.constants.model_config"] = model_config
 
-        for arg_name, accepted_values in expected_args.items():
-            if arg_name not in actual_args:
-                if "" in accepted_values:
-                    continue
-                return False
-            if actual_args[arg_name] not in accepted_values:
-                return False
-        if any(arg_name not in expected_args for arg_name in actual_args):
-            return False
+    ast_checker = importlib.import_module(
+        "bfcl_eval.eval_checker.ast_eval.ast_checker"
+    ).ast_checker
+    language = importlib.import_module("bfcl_eval.constants.enums").Language.PYTHON
+    return ast_checker, language
 
-    return True
+
+def bfcl_model_output(calls: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [{call["name"]: call["arguments"]} for call in calls]
+
+
+def bfcl_ast_result(
+    example: dict[str, object], calls: list[dict[str, object]]
+) -> dict[str, object]:
+    ast_checker, language = load_bfcl_ast_checker()
+    return ast_checker(
+        example["function"],
+        bfcl_model_output(calls),
+        example["ground_truth"],
+        language,
+        str(example["category"]),
+        OPENAI_MODEL,
+    )
 
 
 def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
@@ -493,18 +521,34 @@ def clean_baseline() -> None:
         for example in examples:
             response = call_openai_tool_router(example, api_key)
             calls = response_function_calls(response, tool_name_map(example))
+            eval_result = bfcl_ast_result(example, calls)
             model_predictions.append(
                 {
                     "id": example["id"],
                     "model": OPENAI_MODEL,
                     "prediction": calls,
-                    "correct": matches_ground_truth(calls, example["ground_truth"]),
+                    "correct": eval_result["valid"],
+                    "evaluator": "bfcl_ast_checker",
+                    "eval_result": eval_result,
                     "response_id": response.get("id"),
                     "usage": response.get("usage"),
                 }
             )
             print(f"Ran {OPENAI_MODEL} on {example['id']}")
         write_jsonl(model_predictions_path, model_predictions)
+
+    examples_by_id = {example["id"]: example for example in examples}
+    rescored_model_predictions = []
+    for prediction in model_predictions:
+        calls = prediction["prediction"]
+        eval_result = bfcl_ast_result(examples_by_id[prediction["id"]], calls)
+        rescored_prediction = dict(prediction)
+        rescored_prediction["correct"] = eval_result["valid"]
+        rescored_prediction["evaluator"] = "bfcl_ast_checker"
+        rescored_prediction["eval_result"] = eval_result
+        rescored_model_predictions.append(rescored_prediction)
+    model_predictions = rescored_model_predictions
+    write_jsonl(model_predictions_path, model_predictions)
     model_correct = sum(1 for prediction in model_predictions if prediction["correct"])
 
     write_json(
@@ -538,7 +582,6 @@ def clean_baseline() -> None:
                 },
             },
             "next_required_work": [
-                "Add the BFCL evaluator adapter.",
                 "Compare this clean baseline against noisy variants.",
             ],
         },
