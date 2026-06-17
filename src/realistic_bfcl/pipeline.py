@@ -43,6 +43,11 @@ BFCL_CATEGORY_FILES = {
         "possible_answer/BFCL_v4_parallel_multiple.json",
     ),
 }
+DIMENSION_FILES = {
+    "conversational_overhang": "conversational_overhang.jsonl",
+    "casual_mobile_shorthand": "casual_mobile_shorthand.jsonl",
+    "impatient_tone": "impatient_tone.jsonl",
+}
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,20 @@ STAGES: tuple[Stage, ...] = (
         next_action=(
             "Implement the conversational overhang generator with oracle-preservation metadata."
         ),
+    ),
+    Stage(
+        name="augment-mobile-shorthand",
+        purpose="Generate compressed mobile-style requests that preserve the oracle.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/casual_mobile_shorthand.jsonl",),
+        next_action="Run paired evaluation and inspect whether compressed phrasing drops slots.",
+    ),
+    Stage(
+        name="augment-impatient-tone",
+        purpose="Generate benign frustrated requests that preserve the oracle.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/impatient_tone.jsonl",),
+        next_action="Run paired evaluation and inspect whether user tone changes routing.",
     ),
     Stage(
         name="augment-incremental",
@@ -515,6 +534,38 @@ OVERHANG_TEMPLATES = (
     "{prompt} - trying to finish this before my next meeting",
     "{prompt} if that makes sense",
 )
+IMPATIENT_TEMPLATES = (
+    "ugh {prompt}",
+    "for fuck sake {prompt}",
+    "bro please {prompt}",
+    "can you just {prompt}",
+    "please just {prompt}",
+    "i do not have time for this, {prompt}",
+    "seriously, {prompt}",
+    "come on, {prompt}",
+)
+MOBILE_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "calculate",
+    "compute",
+    "determine",
+    "find",
+    "for",
+    "given",
+    "is",
+    "of",
+    "please",
+    "the",
+    "to",
+    "using",
+    "what",
+    "where",
+    "with",
+}
 
 
 def lowercase_first_alpha(text: str) -> str:
@@ -529,16 +580,40 @@ def overhang_prompt(clean_prompt: str, index: int) -> str:
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
 
 
-def overhang_messages(question: object, index: int) -> object:
+def impatient_prompt(clean_prompt: str, index: int) -> str:
+    template = IMPATIENT_TEMPLATES[index % len(IMPATIENT_TEMPLATES)]
+    return template.format(prompt=lowercase_first_alpha(clean_prompt))
+
+
+def mobile_shorthand_prompt(clean_prompt: str, _index: int) -> str:
+    text = clean_prompt.lower()
+    triangle_area = re.search(
+        r"area of a triangle.*?base(?: of)? (?P<base>-?\d+(?:\.\d+)?).*?"
+        r"height(?: of)? (?P<height>-?\d+(?:\.\d+)?)",
+        text,
+    )
+    if triangle_area:
+        return (
+            f"area triangle {triangle_area.group('base')} base "
+            f"height {triangle_area.group('height')}"
+        )
+
+    text = re.sub(r"(?<!\d)\.|\.(?!\d)", "", text)
+    text = re.sub(r"[?!,;:\"()]", "", text)
+    tokens = [token for token in text.split() if token not in MOBILE_STOPWORDS]
+    return " ".join(tokens)
+
+
+def transform_messages(question: object, index: int, transform: object) -> object:
     conversations = json.loads(json.dumps(question))
     first_message = conversations[0][0]
-    first_message["content"] = overhang_prompt(str(first_message["content"]), index)
+    first_message["content"] = transform(str(first_message["content"]), index)
     return conversations
 
 
-def augment_overhang() -> None:
+def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
     subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
-    output_path = REPO_ROOT / "artifacts/generated/conversational_overhang.jsonl"
+    output_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
 
     if not subset_path.exists():
         raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
@@ -547,11 +622,11 @@ def augment_overhang() -> None:
     for index, example in enumerate(read_jsonl(subset_path)):
         rows.append(
             {
-                "id": f"{example['id']}__overhang",
+                "id": f"{example['id']}__{suffix}",
                 "base_id": example["id"],
                 "category": example["category"],
-                "dimension": "conversational_overhang",
-                "question": overhang_messages(example["question"], index),
+                "dimension": dimension,
+                "question": transform_messages(example["question"], index, transform),
                 "function": example["function"],
                 "ground_truth": example["ground_truth"],
                 "oracle_preservation": {
@@ -563,6 +638,18 @@ def augment_overhang() -> None:
 
     write_jsonl(output_path, rows)
     print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
+
+
+def augment_overhang() -> None:
+    augment_dimension("conversational_overhang", "overhang", overhang_prompt)
+
+
+def augment_mobile_shorthand() -> None:
+    augment_dimension("casual_mobile_shorthand", "mobile", mobile_shorthand_prompt)
+
+
+def augment_impatient_tone() -> None:
+    augment_dimension("impatient_tone", "impatient", impatient_prompt)
 
 
 def accuracy_metrics(predictions: list[dict[str, object]]) -> dict[str, object]:
@@ -800,24 +887,30 @@ def paired_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
-def paired_eval() -> None:
-    noisy_path = REPO_ROOT / "artifacts/generated/conversational_overhang.jsonl"
+def generated_dimensions() -> list[str]:
+    return [
+        dimension
+        for dimension, filename in DIMENSION_FILES.items()
+        if (REPO_ROOT / f"artifacts/generated/{filename}").exists()
+    ]
+
+
+def paired_eval_dimension(dimension: str) -> dict[str, object]:
+    noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
     clean_predictions_path = REPO_ROOT / f"artifacts/results/clean/{OPENAI_MODEL}_predictions.jsonl"
     noisy_predictions_path = (
         REPO_ROOT
-        / f"artifacts/results/noisy/conversational_overhang/{OPENAI_MODEL}_predictions.jsonl"
+        / f"artifacts/results/noisy/{dimension}/{OPENAI_MODEL}_predictions.jsonl"
     )
     paired_path = (
         REPO_ROOT
-        / f"artifacts/results/paired/conversational_overhang/{OPENAI_MODEL}_paired.jsonl"
+        / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
     )
     summary_path = (
         REPO_ROOT
-        / f"artifacts/results/paired/conversational_overhang/{OPENAI_MODEL}_summary.json"
+        / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_summary.json"
     )
 
-    if not noisy_path.exists():
-        raise SystemExit("Missing artifacts/generated/conversational_overhang.jsonl.")
     if not clean_predictions_path.exists():
         raise SystemExit("Missing clean model predictions. Run clean-baseline first.")
 
@@ -855,7 +948,7 @@ def paired_eval() -> None:
             "created_at": utc_now(),
             "stage": "paired-eval",
             "model": OPENAI_MODEL,
-            "dimension": "conversational_overhang",
+            "dimension": dimension,
             "clean_predictions": clean_predictions_path.relative_to(REPO_ROOT).as_posix(),
             "noisy_predictions": noisy_predictions_path.relative_to(REPO_ROOT).as_posix(),
             "paired_results": paired_path.relative_to(REPO_ROOT).as_posix(),
@@ -865,6 +958,27 @@ def paired_eval() -> None:
     )
     print(f"Wrote {paired_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {summary_path.relative_to(REPO_ROOT)}")
+    return {
+        "dimension": dimension,
+        "summary": summary_path.relative_to(REPO_ROOT).as_posix(),
+        "metrics": metrics,
+    }
+
+
+def paired_eval() -> None:
+    dimensions = generated_dimensions()
+    if not dimensions:
+        raise SystemExit("No generated noisy dimensions found. Run an augment stage first.")
+    summaries = [paired_eval_dimension(dimension) for dimension in dimensions]
+    write_json(
+        REPO_ROOT / f"artifacts/results/paired/{OPENAI_MODEL}_summary.json",
+        {
+            "created_at": utc_now(),
+            "stage": "paired-eval",
+            "model": OPENAI_MODEL,
+            "dimensions": summaries,
+        },
+    )
 
 
 def call_names(calls: object) -> list[str]:
@@ -982,21 +1096,17 @@ def analysis_review_row(
     }
 
 
-def analyze() -> None:
+def analyze_dimension(dimension: str) -> dict[str, object]:
     paired_path = (
         REPO_ROOT
-        / f"artifacts/results/paired/conversational_overhang/{OPENAI_MODEL}_paired.jsonl"
+        / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
     )
     clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
-    noisy_path = REPO_ROOT / "artifacts/generated/conversational_overhang.jsonl"
-    summary_path = REPO_ROOT / "artifacts/analysis/conversational_overhang/summary.json"
-    regressions_jsonl_path = (
-        REPO_ROOT / "artifacts/analysis/conversational_overhang/regressions.jsonl"
-    )
-    regressions_csv_path = REPO_ROOT / "artifacts/analysis/conversational_overhang/regressions.csv"
-    recoveries_jsonl_path = (
-        REPO_ROOT / "artifacts/analysis/conversational_overhang/recoveries.jsonl"
-    )
+    noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
+    summary_path = REPO_ROOT / f"artifacts/analysis/{dimension}/summary.json"
+    regressions_jsonl_path = REPO_ROOT / f"artifacts/analysis/{dimension}/regressions.jsonl"
+    regressions_csv_path = REPO_ROOT / f"artifacts/analysis/{dimension}/regressions.csv"
+    recoveries_jsonl_path = REPO_ROOT / f"artifacts/analysis/{dimension}/recoveries.jsonl"
 
     for path in (paired_path, clean_path, noisy_path):
         if not path.exists():
@@ -1056,7 +1166,7 @@ def analyze() -> None:
             "created_at": utc_now(),
             "stage": "analyze",
             "model": OPENAI_MODEL,
-            "dimension": "conversational_overhang",
+            "dimension": dimension,
             "total": len(paired_rows),
             "regressions": {
                 "total": len(regressions),
@@ -1081,6 +1191,34 @@ def analyze() -> None:
     print(f"Wrote {summary_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {regressions_jsonl_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {regressions_csv_path.relative_to(REPO_ROOT)}")
+    return {
+        "dimension": dimension,
+        "summary": summary_path.relative_to(REPO_ROOT).as_posix(),
+        "regression_total": len(regressions),
+        "recovery_total": len(recoveries),
+    }
+
+
+def analyze() -> None:
+    dimensions = [
+        dimension
+        for dimension in generated_dimensions()
+        if (
+            REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
+        ).exists()
+    ]
+    if not dimensions:
+        raise SystemExit("No paired results found. Run paired-eval first.")
+    summaries = [analyze_dimension(dimension) for dimension in dimensions]
+    write_json(
+        REPO_ROOT / "artifacts/analysis/summary.json",
+        {
+            "created_at": utc_now(),
+            "stage": "analyze",
+            "model": OPENAI_MODEL,
+            "dimensions": summaries,
+        },
+    )
 
 
 def run_stage(stage: Stage, dry_run: bool) -> None:
@@ -1095,6 +1233,12 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         return
     if stage.name == "augment-overhang":
         augment_overhang()
+        return
+    if stage.name == "augment-mobile-shorthand":
+        augment_mobile_shorthand()
+        return
+    if stage.name == "augment-impatient-tone":
+        augment_impatient_tone()
         return
     if stage.name == "paired-eval":
         paired_eval()

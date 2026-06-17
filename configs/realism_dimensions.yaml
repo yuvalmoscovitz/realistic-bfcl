@@ -33,3 +33,39 @@ dimensions:
       - final turn leaves any required slot underspecified
       - conversation introduces conflicting values without a repair rule
       - assistant turn teaches or hints at the target tool call
+
+  casual_mobile_shorthand:
+    status: planned
+    description: Compress clean requests into lowercase mobile-style fragments.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - lowercase text
+      - dropped punctuation
+      - dropped filler words
+      - compact slot-first phrasing
+    rejection_rules:
+      - removes an argument value
+      - removes the action or object needed to infer the tool
+      - changes a unit, quantity, entity, or date
+
+  impatient_tone:
+    status: planned
+    description: Add benign frustration, impatience, or profanity around a valid request.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - profanity
+      - impatient phrasing
+      - casual address terms
+      - urgency-like tone without new deadlines
+    rejection_rules:
+      - introduces a new task constraint
+      - changes the requested action
+      - makes refusal or safety behavior the intended target
