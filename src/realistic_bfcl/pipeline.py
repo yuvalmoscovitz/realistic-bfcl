@@ -545,26 +545,14 @@ IMPATIENT_TEMPLATES = (
     "come on, {prompt}",
 )
 MOBILE_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
     "calculate",
     "compute",
     "determine",
     "find",
-    "for",
-    "given",
     "is",
-    "of",
     "please",
-    "the",
-    "to",
-    "using",
     "what",
-    "where",
-    "with",
+    "what's",
 }
 
 
@@ -598,8 +586,9 @@ def mobile_shorthand_prompt(clean_prompt: str, _index: int) -> str:
             f"height {triangle_area.group('height')}"
         )
 
-    text = re.sub(r"(?<!\d)\.|\.(?!\d)", "", text)
-    text = re.sub(r"[?!,;:\"()]", "", text)
+    text = text.strip()
+    text = re.sub(r"[?!]+$", "", text)
+    text = re.sub(r"(?<!\d)\.$", "", text)
     tokens = [token for token in text.split() if token not in MOBILE_STOPWORDS]
     return " ".join(tokens)
 
@@ -888,11 +877,20 @@ def paired_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
 
 
 def generated_dimensions() -> list[str]:
-    return [
+    dimensions = [
         dimension
         for dimension, filename in DIMENSION_FILES.items()
         if (REPO_ROOT / f"artifacts/generated/{filename}").exists()
     ]
+    requested = os.environ.get("REALISTIC_BFCL_DIMENSIONS")
+    if not requested:
+        return dimensions
+    requested_dimensions = [dimension.strip() for dimension in requested.split(",")]
+    unknown = sorted(set(requested_dimensions) - set(DIMENSION_FILES))
+    if unknown:
+        known = ", ".join(DIMENSION_FILES)
+        raise SystemExit(f"Unknown dimensions {unknown}. Known dimensions: {known}")
+    return [dimension for dimension in dimensions if dimension in requested_dimensions]
 
 
 def paired_eval_dimension(dimension: str) -> dict[str, object]:
