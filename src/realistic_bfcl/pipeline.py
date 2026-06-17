@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import csv
 import hashlib
 import importlib
 import json
@@ -205,6 +206,15 @@ def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def write_csv(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fieldnames})
+
+
 def append_jsonl(path: Path, row: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -213,6 +223,14 @@ def append_jsonl(path: Path, row: dict[str, object]) -> None:
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def conversation_text(question: object) -> str:
+    conversations = question if isinstance(question, list) else []
+    if not conversations:
+        return ""
+    messages = conversations[0] if isinstance(conversations[0], list) else []
+    return "\n".join(str(message.get("content", "")) for message in messages)
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -849,6 +867,222 @@ def paired_eval() -> None:
     print(f"Wrote {summary_path.relative_to(REPO_ROOT)}")
 
 
+def call_names(calls: object) -> list[str]:
+    if not isinstance(calls, list):
+        return []
+    return [str(call.get("name", "")) for call in calls if isinstance(call, dict)]
+
+
+def gold_call_names(gold: object) -> list[str]:
+    if not isinstance(gold, list):
+        return []
+    names = []
+    for call in gold:
+        if not isinstance(call, dict):
+            continue
+        names.extend(str(name) for name in call)
+    return names
+
+
+def call_arguments(calls: object) -> list[dict[str, object]]:
+    if not isinstance(calls, list):
+        return []
+    arguments = []
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        value = call.get("arguments", {})
+        arguments.append(value if isinstance(value, dict) else {"__non_dict_arguments__": value})
+    return arguments
+
+
+def gold_arguments(gold: object) -> list[dict[str, object]]:
+    if not isinstance(gold, list):
+        return []
+    arguments = []
+    for call in gold:
+        if not isinstance(call, dict):
+            continue
+        for value in call.values():
+            arguments.append(value if isinstance(value, dict) else {})
+    return arguments
+
+
+def argument_keys(calls: object) -> set[str]:
+    keys: set[str] = set()
+    for arguments in call_arguments(calls):
+        keys.update(str(key) for key in arguments)
+    return keys
+
+
+def gold_argument_keys(gold: object) -> set[str]:
+    keys: set[str] = set()
+    for arguments in gold_arguments(gold):
+        keys.update(str(key) for key in arguments)
+    return keys
+
+
+def heuristic_error_type(
+    gold: object, _clean_prediction: object, noisy_prediction: object
+) -> str:
+    noisy_names = call_names(noisy_prediction)
+    if not noisy_names:
+        return "no_call"
+    if any(
+        "__malformed_arguments__" in arguments
+        for arguments in call_arguments(noisy_prediction)
+    ):
+        return "malformed_arguments"
+    gold_names = gold_call_names(gold)
+    if len(gold_names) != len(noisy_names):
+        return "call_count_mismatch"
+    if gold_names != noisy_names:
+        return "routing_error"
+
+    gold_keys = gold_argument_keys(gold)
+    noisy_keys = argument_keys(noisy_prediction)
+    if gold_keys - noisy_keys:
+        return "argument_drop"
+    if noisy_keys - gold_keys:
+        return "argument_hallucination"
+    return "argument_value_error"
+
+
+def count_by(rows: list[dict[str, object]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = str(row[key])
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def analysis_review_row(
+    row: dict[str, object],
+    clean_examples: dict[str, dict[str, object]],
+    noisy_examples: dict[str, dict[str, object]],
+    outcome: str,
+) -> dict[str, object]:
+    clean_example = clean_examples[str(row["base_id"])]
+    noisy_example = noisy_examples[str(row["noisy_id"])]
+    gold = noisy_example["ground_truth"]
+    return {
+        "base_id": row["base_id"],
+        "noisy_id": row["noisy_id"],
+        "category": row["category"],
+        "dimension": row["dimension"],
+        "outcome": outcome,
+        "heuristic_error_type": heuristic_error_type(
+            gold, row["clean_prediction"], row["noisy_prediction"]
+        ),
+        "clean_prompt": conversation_text(clean_example["question"]),
+        "noisy_prompt": conversation_text(noisy_example["question"]),
+        "gold": gold,
+        "clean_prediction": row["clean_prediction"],
+        "noisy_prediction": row["noisy_prediction"],
+    }
+
+
+def analyze() -> None:
+    paired_path = (
+        REPO_ROOT
+        / f"artifacts/results/paired/conversational_overhang/{OPENAI_MODEL}_paired.jsonl"
+    )
+    clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    noisy_path = REPO_ROOT / "artifacts/generated/conversational_overhang.jsonl"
+    summary_path = REPO_ROOT / "artifacts/analysis/conversational_overhang/summary.json"
+    regressions_jsonl_path = (
+        REPO_ROOT / "artifacts/analysis/conversational_overhang/regressions.jsonl"
+    )
+    regressions_csv_path = REPO_ROOT / "artifacts/analysis/conversational_overhang/regressions.csv"
+    recoveries_jsonl_path = (
+        REPO_ROOT / "artifacts/analysis/conversational_overhang/recoveries.jsonl"
+    )
+
+    for path in (paired_path, clean_path, noisy_path):
+        if not path.exists():
+            raise SystemExit(f"Missing {path.relative_to(REPO_ROOT)}.")
+
+    paired_rows = read_jsonl(paired_path)
+    clean_examples = {row["id"]: row for row in read_jsonl(clean_path)}
+    noisy_examples = {row["id"]: row for row in read_jsonl(noisy_path)}
+
+    regressions = [
+        analysis_review_row(row, clean_examples, noisy_examples, "clean_success_noisy_failure")
+        for row in paired_rows
+        if row["clean_correct"] and not row["noisy_correct"]
+    ]
+    recoveries = [
+        analysis_review_row(row, clean_examples, noisy_examples, "clean_failure_noisy_success")
+        for row in paired_rows
+        if not row["clean_correct"] and row["noisy_correct"]
+    ]
+    stable_failures = [
+        row for row in paired_rows if not row["clean_correct"] and not row["noisy_correct"]
+    ]
+    stable_successes = [
+        row for row in paired_rows if row["clean_correct"] and row["noisy_correct"]
+    ]
+
+    write_jsonl(regressions_jsonl_path, regressions)
+    write_jsonl(recoveries_jsonl_path, recoveries)
+    write_csv(
+        regressions_csv_path,
+        [
+            {
+                **row,
+                "gold": json.dumps(row["gold"], sort_keys=True),
+                "clean_prediction": json.dumps(row["clean_prediction"], sort_keys=True),
+                "noisy_prediction": json.dumps(row["noisy_prediction"], sort_keys=True),
+            }
+            for row in regressions
+        ],
+        [
+            "base_id",
+            "noisy_id",
+            "category",
+            "dimension",
+            "outcome",
+            "heuristic_error_type",
+            "clean_prompt",
+            "noisy_prompt",
+            "gold",
+            "clean_prediction",
+            "noisy_prediction",
+        ],
+    )
+    write_json(
+        summary_path,
+        {
+            "created_at": utc_now(),
+            "stage": "analyze",
+            "model": OPENAI_MODEL,
+            "dimension": "conversational_overhang",
+            "total": len(paired_rows),
+            "regressions": {
+                "total": len(regressions),
+                "by_category": count_by(regressions, "category"),
+                "by_heuristic_error_type": count_by(regressions, "heuristic_error_type"),
+                "jsonl": regressions_jsonl_path.relative_to(REPO_ROOT).as_posix(),
+                "csv": regressions_csv_path.relative_to(REPO_ROOT).as_posix(),
+            },
+            "recoveries": {
+                "total": len(recoveries),
+                "by_category": count_by(recoveries, "category"),
+                "by_heuristic_error_type": count_by(recoveries, "heuristic_error_type"),
+                "jsonl": recoveries_jsonl_path.relative_to(REPO_ROOT).as_posix(),
+            },
+            "stable_successes": len(stable_successes),
+            "stable_failures": len(stable_failures),
+            "taxonomy_note": (
+                "heuristic_error_type is a triage label for manual review, not final taxonomy."
+            ),
+        },
+    )
+    print(f"Wrote {summary_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {regressions_jsonl_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {regressions_csv_path.relative_to(REPO_ROOT)}")
+
+
 def run_stage(stage: Stage, dry_run: bool) -> None:
     describe_stage(stage)
     if dry_run:
@@ -864,6 +1098,9 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         return
     if stage.name == "paired-eval":
         paired_eval()
+        return
+    if stage.name == "analyze":
+        analyze()
         return
     raise SystemExit(
         "Stage implementation pending. Use --dry-run for planning, then replace "
