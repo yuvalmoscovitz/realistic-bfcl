@@ -1,0 +1,94 @@
+# Realistic-BFCL
+
+Realistic-BFCL is a realism-controlled metamorphic benchmark layer over the
+Berkeley Function Calling Leaderboard (BFCL).
+
+The research question is whether high clean BFCL scores imply robust
+real-world tool routing. Real users add irrelevant context, reveal intent over
+multiple turns, correct themselves, type casually, sound impatient, mix
+languages, and omit words while remaining understandable. This project measures
+where tool routers fail under ordinary production-like conversational noise.
+
+## Core Claim
+
+BFCL provides the trusted deterministic evaluation substrate. Realistic-BFCL
+adds realistic conversational transformations on top of BFCL while preserving
+the gold tool-call oracle. The benchmark is designed for paired evaluation:
+
+```text
+same base example
+same tool schema
+same model
+clean prompt vs. realistic noisy prompt
+```
+
+The noisy prompt must preserve the original function name and arguments unless
+the transformation explicitly models correction or self-repair. In that case,
+the final oracle must be well-defined and derived from the clean oracle.
+
+## Repository Map
+
+```text
+configs/
+  project.yaml                 Reproducibility pins and current assumptions.
+  realism_dimensions.yaml      Initial augmentation dimensions and limits.
+  subsets/smoke.yaml           First clean subset definition.
+docs/
+  research_pipeline.md         Staged execution plan.
+  realism_contract.md          Validity rules and rejection criteria.
+  evaluation_metrics.md        Paired metrics and error taxonomy.
+src/realistic_bfcl/
+  pipeline.py                  Stage registry used by scripts and Makefile.
+  contracts.py                 Lightweight data contracts for examples.
+scripts/
+  run_stage.py                 Single entry point for staged execution.
+Makefile                       Human-facing stage commands.
+```
+
+## Current Stage Commands
+
+The stage commands are intentionally lightweight placeholders. They make the
+pipeline executable and fail clearly until the corresponding research artifact
+is implemented.
+
+```bash
+make status
+make lint
+make freeze-bfcl
+make clean-baseline
+make augment-overhang
+make augment-incremental
+make verify-noisy
+make paired-eval
+make analyze
+make defenses
+```
+
+To inspect all registered stages:
+
+```bash
+python scripts/run_stage.py --list
+```
+
+To dry-run a stage and see its expected inputs and outputs:
+
+```bash
+python scripts/run_stage.py clean-baseline --dry-run
+```
+
+## Immediate Milestones
+
+1. Pin BFCL dataset commit, evaluator version, model list, and clean subset.
+2. Reproduce clean BFCL-style scores on the selected subset.
+3. Implement two high-realism transformations:
+   - conversational overhang
+   - incremental slot revelation
+4. Add automatic invariant checks for oracle preservation.
+5. Run paired clean-vs-noisy evaluation and report degradation.
+
+## Non-Goals For The First Pass
+
+- Large perturbation catalogs.
+- Adversarial or unnatural prompts.
+- Unverified synthetic examples.
+- Model-specific prompt tuning before the clean baseline is reproduced.

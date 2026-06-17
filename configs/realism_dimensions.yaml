@@ -1,0 +1,35 @@
+dimensions:
+  conversational_overhang:
+    status: planned
+    description: Add realistic irrelevant conversational context before or after the clean request.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - background context that does not constrain the tool call
+      - casual tone
+      - mild impatience
+      - natural filler
+    rejection_rules:
+      - adds a new constraint not present in the clean prompt
+      - weakens or removes a required constraint
+      - makes multiple tool calls plausible when the clean oracle has one
+
+  incremental_slot_revelation:
+    status: planned
+    description: Split one clean request across multiple natural turns while keeping the final user intent equivalent.
+    must_preserve:
+      - final function_name
+      - final argument set
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - missing slot in an early turn that is supplied later
+      - short follow-up answer
+      - natural clarification-like progression
+    rejection_rules:
+      - final turn leaves any required slot underspecified
+      - conversation introduces conflicting values without a repair rule
+      - assistant turn teaches or hints at the target tool call

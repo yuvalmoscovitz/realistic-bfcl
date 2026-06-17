@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "realistic-bfcl"
+version = "0.1.0"
+description = "Realism-controlled metamorphic benchmark layer over BFCL."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+
+[project.optional-dependencies]
+dev = ["ruff>=0.8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["scripts", "src"]
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/run_stage.py" = ["E402", "I001"]
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
