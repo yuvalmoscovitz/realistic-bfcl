@@ -4,6 +4,9 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +14,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BFCL_COMMIT = "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
 BFCL_REPOSITORY = "https://github.com/ShishirPatil/gorilla"
+OPENAI_MODEL = "gpt-5.4-nano"
+OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 BFCL_CATEGORY_FILES = {
     "simple_python": (
         "BFCL_v4_simple_python.json",
@@ -184,6 +189,41 @@ def read_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
+def read_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def openai_api_key() -> str:
+    if os.environ.get("OPENAI_API_KEY"):
+        return os.environ["OPENAI_API_KEY"]
+
+    candidates = [
+        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
+        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
+        else None,
+        REPO_ROOT.parent / "underlayer/.env",
+    ]
+    for path in candidates:
+        if path is None:
+            continue
+        key = read_env_file(path).get("OPENAI_API_KEY")
+        if key:
+            return key
+
+    raise SystemExit(
+        "Missing OPENAI_API_KEY. Set it in the environment or REALISTIC_BFCL_ENV_FILE."
+    )
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -234,6 +274,140 @@ def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
     return subset_path
 
 
+def openai_type(type_name: str) -> str:
+    return {"dict": "object", "float": "number"}.get(type_name, type_name)
+
+
+def normalize_json_schema(value: object) -> object:
+    if isinstance(value, dict):
+        normalized = {}
+        for key, child in value.items():
+            if key == "type" and isinstance(child, str):
+                normalized[key] = openai_type(child)
+            else:
+                normalized[key] = normalize_json_schema(child)
+        return normalized
+    if isinstance(value, list):
+        return [normalize_json_schema(item) for item in value]
+    return value
+
+
+def safe_tool_name(name: str, index: int) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+    return f"{safe}_{index}"
+
+
+def openai_tool(function_doc: dict[str, object], name: str) -> dict[str, object]:
+    parameters = normalize_json_schema(function_doc["parameters"])
+    return {
+        "type": "function",
+        "name": name,
+        "description": function_doc.get("description", ""),
+        "parameters": parameters,
+    }
+
+
+def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[str, object]:
+    messages = example["question"][0]
+    user_content = "\n".join(message["content"] for message in messages)
+    tools = []
+    for index, function_doc in enumerate(example["function"]):
+        tools.append(openai_tool(function_doc, safe_tool_name(str(function_doc["name"]), index)))
+    payload = {
+        "model": OPENAI_MODEL,
+        "input": [
+            {
+                "role": "system",
+                "content": (
+                    "Call the provided tool that best satisfies the user request. "
+                    "Do not answer in prose when a tool call is appropriate."
+                ),
+            },
+            {"role": "user", "content": user_content},
+        ],
+        "tools": tools,
+        "tool_choice": "required",
+        "max_output_tokens": 256,
+    }
+    request = urllib.request.Request(
+        OPENAI_RESPONSES_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        raise SystemExit(f"OpenAI API request failed: HTTP {error.code}: {body}") from error
+
+
+def tool_name_map(example: dict[str, object]) -> dict[str, str]:
+    return {
+        safe_tool_name(str(function_doc["name"]), index): str(function_doc["name"])
+        for index, function_doc in enumerate(example["function"])
+    }
+
+
+def response_function_calls(
+    response: dict[str, object], name_map: dict[str, str]
+) -> list[dict[str, object]]:
+    calls = []
+    for item in response.get("output", []):
+        if item.get("type") != "function_call":
+            continue
+        try:
+            arguments = json.loads(item.get("arguments") or "{}")
+        except json.JSONDecodeError:
+            arguments = {"__malformed_arguments__": item.get("arguments")}
+        name = str(item.get("name"))
+        calls.append({"name": name_map.get(name, name), "arguments": arguments})
+    return calls
+
+
+def matches_ground_truth(
+    calls: list[dict[str, object]], ground_truth: list[dict[str, object]]
+) -> bool:
+    if len(calls) != len(ground_truth):
+        return False
+
+    for call, expected_call in zip(calls, ground_truth):
+        if len(expected_call) != 1:
+            return False
+        expected_name, expected_args = next(iter(expected_call.items()))
+        actual_args = call.get("arguments", {})
+        if call.get("name") != expected_name or not isinstance(actual_args, dict):
+            return False
+
+        for arg_name, accepted_values in expected_args.items():
+            if arg_name not in actual_args:
+                if "" in accepted_values:
+                    continue
+                return False
+            if actual_args[arg_name] not in accepted_values:
+                return False
+        if any(arg_name not in expected_args for arg_name in actual_args):
+            return False
+
+    return True
+
+
+def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for prediction in predictions:
+        usage = prediction.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        for key, value in usage.items():
+            if isinstance(value, int):
+                totals[key] = totals.get(key, 0) + value
+    return totals
+
+
 def freeze_bfcl() -> None:
     project_config = REPO_ROOT / "configs/project.yaml"
     subset_config = REPO_ROOT / "configs/subsets/smoke.yaml"
@@ -266,8 +440,8 @@ def freeze_bfcl() -> None:
                 "subset_yaml_sha256": file_sha256(subset_config),
             },
             "model_list": {
-                "status": "not_configured",
-                "models": [],
+                "status": "configured",
+                "models": [OPENAI_MODEL],
             },
             "status": "source_pinned_subset_materialized",
             "notes": [
@@ -283,7 +457,8 @@ def clean_baseline() -> None:
     manifest_path = REPO_ROOT / "artifacts/frozen/bfcl_manifest.json"
     subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     result_path = REPO_ROOT / "artifacts/results/clean/clean_baseline_summary.json"
-    predictions_path = REPO_ROOT / "artifacts/results/clean/oracle_replay_predictions.jsonl"
+    oracle_predictions_path = REPO_ROOT / "artifacts/results/clean/oracle_replay_predictions.jsonl"
+    model_predictions_path = REPO_ROOT / f"artifacts/results/clean/{OPENAI_MODEL}_predictions.jsonl"
 
     if not manifest_path.exists():
         raise SystemExit("Missing artifacts/frozen/bfcl_manifest.json. Run freeze-bfcl first.")
@@ -301,27 +476,70 @@ def clean_baseline() -> None:
         }
         for example in examples
     ]
-    write_jsonl(predictions_path, predictions)
+    write_jsonl(oracle_predictions_path, predictions)
+
+    if model_predictions_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_MODEL_RUN"):
+        model_predictions = read_jsonl(model_predictions_path)
+        if len(model_predictions) != len(examples):
+            raise SystemExit(
+                f"Existing {model_predictions_path.relative_to(REPO_ROOT)} has "
+                f"{len(model_predictions)} rows, expected {len(examples)}. "
+                "Set REALISTIC_BFCL_FORCE_MODEL_RUN=1 to rerun model calls."
+            )
+        print(f"Reused {model_predictions_path.relative_to(REPO_ROOT)}")
+    else:
+        api_key = openai_api_key()
+        model_predictions = []
+        for example in examples:
+            response = call_openai_tool_router(example, api_key)
+            calls = response_function_calls(response, tool_name_map(example))
+            model_predictions.append(
+                {
+                    "id": example["id"],
+                    "model": OPENAI_MODEL,
+                    "prediction": calls,
+                    "correct": matches_ground_truth(calls, example["ground_truth"]),
+                    "response_id": response.get("id"),
+                    "usage": response.get("usage"),
+                }
+            )
+            print(f"Ran {OPENAI_MODEL} on {example['id']}")
+        write_jsonl(model_predictions_path, model_predictions)
+    model_correct = sum(1 for prediction in model_predictions if prediction["correct"])
 
     write_json(
         result_path,
         {
             "created_at": utc_now(),
             "stage": "clean-baseline",
-            "status": "ran_oracle_replay",
-            "reason": "Oracle replay validates subset loading, gold alignment, and result saving.",
+            "status": "ran_model_baseline",
+            "reason": "Ran oracle replay and a real OpenAI model baseline.",
             "bfcl_manifest": "artifacts/frozen/bfcl_manifest.json",
             "bfcl_dataset_commit": manifest["bfcl"]["dataset_commit"],
-            "predictions": "artifacts/results/clean/oracle_replay_predictions.jsonl",
-            "models": ["oracle_replay"],
+            "predictions": {
+                "oracle_replay": "artifacts/results/clean/oracle_replay_predictions.jsonl",
+                OPENAI_MODEL: f"artifacts/results/clean/{OPENAI_MODEL}_predictions.jsonl",
+            },
+            "models": ["oracle_replay", OPENAI_MODEL],
             "metrics": {
-                "clean_total": len(predictions),
-                "clean_correct": len(predictions),
-                "clean_accuracy": 1.0 if predictions else None,
+                "oracle_replay": {
+                    "clean_total": len(predictions),
+                    "clean_correct": len(predictions),
+                    "clean_accuracy": 1.0 if predictions else None,
+                    "usage": {},
+                },
+                OPENAI_MODEL: {
+                    "clean_total": len(model_predictions),
+                    "clean_correct": model_correct,
+                    "clean_accuracy": model_correct / len(model_predictions)
+                    if model_predictions
+                    else None,
+                    "usage": aggregate_usage(model_predictions),
+                },
             },
             "next_required_work": [
                 "Add the BFCL evaluator adapter.",
-                "Configure the real model list before recording model clean accuracy.",
+                "Compare this clean baseline against noisy variants.",
             ],
         },
     )
