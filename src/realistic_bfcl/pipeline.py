@@ -551,9 +551,9 @@ def accuracy_metrics(predictions: list[dict[str, object]]) -> dict[str, object]:
     correct = sum(1 for prediction in predictions if prediction["correct"])
     total = len(predictions)
     return {
-        "clean_total": total,
-        "clean_correct": correct,
-        "clean_accuracy": correct / total if total else None,
+        "total": total,
+        "correct": correct,
+        "accuracy": correct / total if total else None,
     }
 
 
@@ -568,6 +568,58 @@ def category_metrics(
         category: accuracy_metrics(category_predictions)
         for category, category_predictions in sorted(by_category.items())
     }
+
+
+def run_or_load_model_predictions(
+    examples: list[dict[str, object]], model_predictions_path: Path
+) -> list[dict[str, object]]:
+    if model_predictions_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_MODEL_RUN"):
+        cached_predictions = {
+            prediction["id"]: prediction for prediction in read_jsonl(model_predictions_path)
+        }
+        print(f"Loaded {len(cached_predictions)} cached {OPENAI_MODEL} predictions")
+    else:
+        cached_predictions = {}
+
+    missing_examples = [example for example in examples if example["id"] not in cached_predictions]
+    if missing_examples:
+        api_key = openai_api_key()
+        concurrency = min(openai_concurrency(), len(missing_examples))
+        print(
+            f"Running {len(missing_examples)} missing {OPENAI_MODEL} calls "
+            f"at concurrency {concurrency}"
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {
+                executor.submit(run_openai_prediction, example, api_key): example
+                for example in missing_examples
+            }
+            for future in concurrent.futures.as_completed(futures):
+                example = futures[future]
+                prediction = future.result()
+                cached_predictions[example["id"]] = prediction
+                append_jsonl(model_predictions_path, prediction)
+                print(f"Ran {OPENAI_MODEL} on {example['id']}")
+    else:
+        print(f"All {OPENAI_MODEL} predictions were cached")
+
+    missing_ids = [example["id"] for example in examples if example["id"] not in cached_predictions]
+    if missing_ids:
+        raise SystemExit(f"Missing predictions after model run: {missing_ids[:5]}")
+
+    predictions = [cached_predictions[example["id"]] for example in examples]
+    examples_by_id = {example["id"]: example for example in examples}
+    rescored_predictions = []
+    for prediction in predictions:
+        calls = prediction["prediction"]
+        eval_result = bfcl_ast_result(examples_by_id[prediction["id"]], calls)
+        rescored_prediction = dict(prediction)
+        rescored_prediction["correct"] = eval_result["valid"]
+        rescored_prediction["evaluator"] = "bfcl_ast_checker"
+        rescored_prediction["eval_result"] = eval_result
+        rescored_predictions.append(rescored_prediction)
+    write_jsonl(model_predictions_path, rescored_predictions)
+    return rescored_predictions
 
 
 def run_openai_prediction(example: dict[str, object], api_key: str) -> dict[str, object]:
@@ -656,54 +708,8 @@ def clean_baseline() -> None:
     ]
     write_jsonl(oracle_predictions_path, predictions)
 
-    if model_predictions_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_MODEL_RUN"):
-        cached_predictions = {
-            prediction["id"]: prediction for prediction in read_jsonl(model_predictions_path)
-        }
-        print(f"Loaded {len(cached_predictions)} cached {OPENAI_MODEL} predictions")
-    else:
-        cached_predictions = {}
-
-    missing_examples = [example for example in examples if example["id"] not in cached_predictions]
-    if missing_examples:
-        api_key = openai_api_key()
-        concurrency = min(openai_concurrency(), len(missing_examples))
-        print(
-            f"Running {len(missing_examples)} missing {OPENAI_MODEL} calls "
-            f"at concurrency {concurrency}"
-        )
-        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {
-                executor.submit(run_openai_prediction, example, api_key): example
-                for example in missing_examples
-            }
-            for future in concurrent.futures.as_completed(futures):
-                example = futures[future]
-                prediction = future.result()
-                cached_predictions[example["id"]] = prediction
-                append_jsonl(model_predictions_path, prediction)
-                print(f"Ran {OPENAI_MODEL} on {example['id']}")
-    else:
-        print(f"All {OPENAI_MODEL} predictions were cached")
-
-    missing_ids = [example["id"] for example in examples if example["id"] not in cached_predictions]
-    if missing_ids:
-        raise SystemExit(f"Missing predictions after baseline run: {missing_ids[:5]}")
-
-    model_predictions = [cached_predictions[example["id"]] for example in examples]
-
     examples_by_id = {example["id"]: example for example in examples}
-    rescored_model_predictions = []
-    for prediction in model_predictions:
-        calls = prediction["prediction"]
-        eval_result = bfcl_ast_result(examples_by_id[prediction["id"]], calls)
-        rescored_prediction = dict(prediction)
-        rescored_prediction["correct"] = eval_result["valid"]
-        rescored_prediction["evaluator"] = "bfcl_ast_checker"
-        rescored_prediction["eval_result"] = eval_result
-        rescored_model_predictions.append(rescored_prediction)
-    model_predictions = rescored_model_predictions
-    write_jsonl(model_predictions_path, model_predictions)
+    model_predictions = run_or_load_model_predictions(examples, model_predictions_path)
     oracle_metrics = accuracy_metrics(predictions)
     model_metrics = accuracy_metrics(model_predictions)
     oracle_metrics["usage"] = {}
@@ -739,6 +745,110 @@ def clean_baseline() -> None:
     print(f"Wrote {result_path.relative_to(REPO_ROOT)}")
 
 
+def paired_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
+    total = len(rows)
+    clean_correct = sum(1 for row in rows if row["clean_correct"])
+    noisy_correct = sum(1 for row in rows if row["noisy_correct"])
+    clean_success_noisy_failure = sum(
+        1 for row in rows if row["clean_correct"] and not row["noisy_correct"]
+    )
+    clean_failure_noisy_success = sum(
+        1 for row in rows if not row["clean_correct"] and row["noisy_correct"]
+    )
+    both_correct = sum(1 for row in rows if row["clean_correct"] and row["noisy_correct"])
+    both_wrong = sum(1 for row in rows if not row["clean_correct"] and not row["noisy_correct"])
+    clean_accuracy = clean_correct / total if total else None
+    noisy_accuracy = noisy_correct / total if total else None
+    degradation = (
+        clean_accuracy - noisy_accuracy
+        if clean_accuracy is not None and noisy_accuracy is not None
+        else None
+    )
+    return {
+        "total": total,
+        "clean_correct": clean_correct,
+        "noisy_correct": noisy_correct,
+        "clean_accuracy": clean_accuracy,
+        "noisy_accuracy": noisy_accuracy,
+        "absolute_degradation": degradation,
+        "relative_degradation": degradation / clean_accuracy if clean_accuracy else None,
+        "conditional_failure_given_clean_success": (
+            clean_success_noisy_failure / clean_correct if clean_correct else None
+        ),
+        "clean_success_noisy_failure": clean_success_noisy_failure,
+        "clean_failure_noisy_success": clean_failure_noisy_success,
+        "both_correct": both_correct,
+        "both_wrong": both_wrong,
+    }
+
+
+def paired_eval() -> None:
+    noisy_path = REPO_ROOT / "artifacts/generated/conversational_overhang.jsonl"
+    clean_predictions_path = REPO_ROOT / f"artifacts/results/clean/{OPENAI_MODEL}_predictions.jsonl"
+    noisy_predictions_path = (
+        REPO_ROOT
+        / f"artifacts/results/noisy/conversational_overhang/{OPENAI_MODEL}_predictions.jsonl"
+    )
+    paired_path = (
+        REPO_ROOT
+        / f"artifacts/results/paired/conversational_overhang/{OPENAI_MODEL}_paired.jsonl"
+    )
+    summary_path = (
+        REPO_ROOT
+        / f"artifacts/results/paired/conversational_overhang/{OPENAI_MODEL}_summary.json"
+    )
+
+    if not noisy_path.exists():
+        raise SystemExit("Missing artifacts/generated/conversational_overhang.jsonl.")
+    if not clean_predictions_path.exists():
+        raise SystemExit("Missing clean model predictions. Run clean-baseline first.")
+
+    noisy_examples = read_jsonl(noisy_path)
+    clean_predictions = {
+        prediction["id"]: prediction for prediction in read_jsonl(clean_predictions_path)
+    }
+    noisy_predictions = run_or_load_model_predictions(noisy_examples, noisy_predictions_path)
+    noisy_predictions_by_id = {prediction["id"]: prediction for prediction in noisy_predictions}
+
+    paired_rows = []
+    for noisy_example in noisy_examples:
+        clean_prediction = clean_predictions[noisy_example["base_id"]]
+        noisy_prediction = noisy_predictions_by_id[noisy_example["id"]]
+        paired_rows.append(
+            {
+                "base_id": noisy_example["base_id"],
+                "noisy_id": noisy_example["id"],
+                "dimension": noisy_example["dimension"],
+                "category": noisy_example["category"],
+                "clean_correct": clean_prediction["correct"],
+                "noisy_correct": noisy_prediction["correct"],
+                "clean_prediction": clean_prediction["prediction"],
+                "noisy_prediction": noisy_prediction["prediction"],
+            }
+        )
+
+    write_jsonl(paired_path, paired_rows)
+    metrics = paired_metrics(paired_rows)
+    noisy_accuracy = accuracy_metrics(noisy_predictions)
+    noisy_accuracy["usage"] = aggregate_usage(noisy_predictions)
+    write_json(
+        summary_path,
+        {
+            "created_at": utc_now(),
+            "stage": "paired-eval",
+            "model": OPENAI_MODEL,
+            "dimension": "conversational_overhang",
+            "clean_predictions": clean_predictions_path.relative_to(REPO_ROOT).as_posix(),
+            "noisy_predictions": noisy_predictions_path.relative_to(REPO_ROOT).as_posix(),
+            "paired_results": paired_path.relative_to(REPO_ROOT).as_posix(),
+            "metrics": metrics,
+            "noisy_metrics": noisy_accuracy,
+        },
+    )
+    print(f"Wrote {paired_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {summary_path.relative_to(REPO_ROOT)}")
+
+
 def run_stage(stage: Stage, dry_run: bool) -> None:
     describe_stage(stage)
     if dry_run:
@@ -751,6 +861,9 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         return
     if stage.name == "augment-overhang":
         augment_overhang()
+        return
+    if stage.name == "paired-eval":
+        paired_eval()
         return
     raise SystemExit(
         "Stage implementation pending. Use --dry-run for planning, then replace "
