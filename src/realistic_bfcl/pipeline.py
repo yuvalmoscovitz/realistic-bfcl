@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import importlib
 import json
 import os
 import re
 import sys
+import time
 import types
 import urllib.error
 import urllib.request
@@ -19,6 +21,9 @@ BFCL_COMMIT = "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
 BFCL_REPOSITORY = "https://github.com/ShishirPatil/gorilla"
 OPENAI_MODEL = "gpt-5.4-nano"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+DEFAULT_OPENAI_CONCURRENCY = 8
+OPENAI_MAX_ATTEMPTS = 4
+RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
 BFCL_CATEGORY_FILES = {
     "simple_python": (
         "BFCL_v4_simple_python.json",
@@ -233,6 +238,17 @@ def openai_api_key() -> str:
     )
 
 
+def openai_concurrency() -> int:
+    value = os.environ.get("REALISTIC_BFCL_CONCURRENCY", str(DEFAULT_OPENAI_CONCURRENCY))
+    try:
+        concurrency = int(value)
+    except ValueError as error:
+        raise SystemExit("REALISTIC_BFCL_CONCURRENCY must be an integer.") from error
+    if concurrency < 1:
+        raise SystemExit("REALISTIC_BFCL_CONCURRENCY must be >= 1.")
+    return concurrency
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -362,12 +378,23 @@ def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[st
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise SystemExit(f"OpenAI API request failed: HTTP {error.code}: {body}") from error
+    for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            if error.code in RETRYABLE_HTTP_STATUS and attempt < OPENAI_MAX_ATTEMPTS:
+                time.sleep(2**attempt)
+                continue
+            raise RuntimeError(f"OpenAI API request failed: HTTP {error.code}: {body}") from error
+        except urllib.error.URLError as error:
+            if attempt < OPENAI_MAX_ATTEMPTS:
+                time.sleep(2**attempt)
+                continue
+            raise RuntimeError(f"OpenAI API request failed: {error}") from error
+
+    raise RuntimeError("OpenAI API request failed without returning a response.")
 
 
 def tool_name_map(example: dict[str, object]) -> dict[str, str]:
@@ -442,6 +469,22 @@ def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
             if isinstance(value, int):
                 totals[key] = totals.get(key, 0) + value
     return totals
+
+
+def run_openai_prediction(example: dict[str, object], api_key: str) -> dict[str, object]:
+    response = call_openai_tool_router(example, api_key)
+    calls = response_function_calls(response, tool_name_map(example))
+    eval_result = bfcl_ast_result(example, calls)
+    return {
+        "id": example["id"],
+        "model": OPENAI_MODEL,
+        "prediction": calls,
+        "correct": eval_result["valid"],
+        "evaluator": "bfcl_ast_checker",
+        "eval_result": eval_result,
+        "response_id": response.get("id"),
+        "usage": response.get("usage"),
+    }
 
 
 def freeze_bfcl() -> None:
@@ -522,29 +565,27 @@ def clean_baseline() -> None:
     else:
         cached_predictions = {}
 
-    api_key = None
-    for example in examples:
-        if example["id"] not in cached_predictions:
-            if api_key is None:
-                api_key = openai_api_key()
-            response = call_openai_tool_router(example, api_key)
-            calls = response_function_calls(response, tool_name_map(example))
-            eval_result = bfcl_ast_result(example, calls)
-            prediction = {
-                "id": example["id"],
-                "model": OPENAI_MODEL,
-                "prediction": calls,
-                "correct": eval_result["valid"],
-                "evaluator": "bfcl_ast_checker",
-                "eval_result": eval_result,
-                "response_id": response.get("id"),
-                "usage": response.get("usage"),
+    missing_examples = [example for example in examples if example["id"] not in cached_predictions]
+    if missing_examples:
+        api_key = openai_api_key()
+        concurrency = min(openai_concurrency(), len(missing_examples))
+        print(
+            f"Running {len(missing_examples)} missing {OPENAI_MODEL} calls "
+            f"at concurrency {concurrency}"
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {
+                executor.submit(run_openai_prediction, example, api_key): example
+                for example in missing_examples
             }
-            cached_predictions[example["id"]] = prediction
-            append_jsonl(model_predictions_path, prediction)
-            print(f"Ran {OPENAI_MODEL} on {example['id']}")
-        else:
-            print(f"Reused {OPENAI_MODEL} on {example['id']}")
+            for future in concurrent.futures.as_completed(futures):
+                example = futures[future]
+                prediction = future.result()
+                cached_predictions[example["id"]] = prediction
+                append_jsonl(model_predictions_path, prediction)
+                print(f"Ran {OPENAI_MODEL} on {example['id']}")
+    else:
+        print(f"All {OPENAI_MODEL} predictions were cached")
 
     missing_ids = [example["id"] for example in examples if example["id"] not in cached_predictions]
     if missing_ids:

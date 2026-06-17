@@ -82,7 +82,8 @@ default local inspection path.
 
 `clean-baseline` runs `oracle_replay` and `gpt-5.4-nano`. Provide the OpenAI key
 through `OPENAI_API_KEY`, `REALISTIC_BFCL_ENV_FILE=/path/to/.env`, or a sibling
-`../underlayer/.env` file.
+`../underlayer/.env` file. Missing model predictions run in parallel with
+`REALISTIC_BFCL_CONCURRENCY`, which defaults to `8`.
 
 ## Immediate Milestones
 
