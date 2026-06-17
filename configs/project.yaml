@@ -11,7 +11,8 @@ bfcl:
 evaluation:
   paired_design: true
   clean_first_required: true
-  models: []
+  models:
+    - gpt-5.4-nano
   outputs:
     clean_results: artifacts/results/clean/
     noisy_results: artifacts/results/noisy/
