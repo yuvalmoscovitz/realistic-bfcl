@@ -483,6 +483,63 @@ def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
     return totals
 
 
+OVERHANG_PREFIXES = (
+    "I'm sorting through a few unrelated tasks, but the actual thing I need is this: ",
+    "Quick one while I have a bunch of other notes open: ",
+    "Ignore the surrounding context here; for the real request, ",
+    "I was looking at something else a minute ago, but now I need you to handle this: ",
+)
+
+OVERHANG_SUFFIXES = (
+    " That's the only action I need.",
+    " No need to use the other context.",
+    " Please just focus on that request.",
+    " Everything else here is irrelevant.",
+)
+
+
+def overhang_prompt(clean_prompt: str, index: int) -> str:
+    prefix = OVERHANG_PREFIXES[index % len(OVERHANG_PREFIXES)]
+    suffix = OVERHANG_SUFFIXES[(index // len(OVERHANG_PREFIXES)) % len(OVERHANG_SUFFIXES)]
+    return f"{prefix}{clean_prompt}{suffix}"
+
+
+def overhang_messages(question: object, index: int) -> object:
+    conversations = json.loads(json.dumps(question))
+    first_message = conversations[0][0]
+    first_message["content"] = overhang_prompt(str(first_message["content"]), index)
+    return conversations
+
+
+def augment_overhang() -> None:
+    subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    output_path = REPO_ROOT / "artifacts/generated/conversational_overhang.jsonl"
+
+    if not subset_path.exists():
+        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
+
+    rows = []
+    for index, example in enumerate(read_jsonl(subset_path)):
+        rows.append(
+            {
+                "id": f"{example['id']}__overhang",
+                "base_id": example["id"],
+                "category": example["category"],
+                "dimension": "conversational_overhang",
+                "question": overhang_messages(example["question"], index),
+                "function": example["function"],
+                "ground_truth": example["ground_truth"],
+                "oracle_preservation": {
+                    "function_schema_unchanged": True,
+                    "ground_truth_unchanged": True,
+                },
+            }
+        )
+
+    write_jsonl(output_path, rows)
+    print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
+
+
 def accuracy_metrics(predictions: list[dict[str, object]]) -> dict[str, object]:
     correct = sum(1 for prediction in predictions if prediction["correct"])
     total = len(predictions)
@@ -684,6 +741,9 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         return
     if stage.name == "clean-baseline":
         clean_baseline()
+        return
+    if stage.name == "augment-overhang":
+        augment_overhang()
         return
     raise SystemExit(
         "Stage implementation pending. Use --dry-run for planning, then replace "
