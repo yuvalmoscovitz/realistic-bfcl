@@ -3,7 +3,7 @@ subset:
   purpose: Minimal subset used to validate BFCL evaluator wiring before scaling.
   bfcl_categories:
     - simple_python
-  max_examples: 50
+  max_examples: 400
   selection:
     deterministic: true
     seed: 20260616

@@ -188,6 +188,12 @@ def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def append_jsonl(path: Path, row: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+
 def read_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
@@ -291,7 +297,9 @@ def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
 
 
 def openai_type(type_name: str) -> str:
-    return {"dict": "object", "float": "number"}.get(type_name, type_name)
+    return {"any": "string", "dict": "object", "float": "number", "tuple": "array"}.get(
+        type_name, type_name
+    )
 
 
 def normalize_json_schema(value: object) -> object:
@@ -507,35 +515,42 @@ def clean_baseline() -> None:
     write_jsonl(oracle_predictions_path, predictions)
 
     if model_predictions_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_MODEL_RUN"):
-        model_predictions = read_jsonl(model_predictions_path)
-        if len(model_predictions) != len(examples):
-            raise SystemExit(
-                f"Existing {model_predictions_path.relative_to(REPO_ROOT)} has "
-                f"{len(model_predictions)} rows, expected {len(examples)}. "
-                "Set REALISTIC_BFCL_FORCE_MODEL_RUN=1 to rerun model calls."
-            )
-        print(f"Reused {model_predictions_path.relative_to(REPO_ROOT)}")
+        cached_predictions = {
+            prediction["id"]: prediction for prediction in read_jsonl(model_predictions_path)
+        }
+        print(f"Loaded {len(cached_predictions)} cached {OPENAI_MODEL} predictions")
     else:
-        api_key = openai_api_key()
-        model_predictions = []
-        for example in examples:
+        cached_predictions = {}
+
+    api_key = None
+    for example in examples:
+        if example["id"] not in cached_predictions:
+            if api_key is None:
+                api_key = openai_api_key()
             response = call_openai_tool_router(example, api_key)
             calls = response_function_calls(response, tool_name_map(example))
             eval_result = bfcl_ast_result(example, calls)
-            model_predictions.append(
-                {
-                    "id": example["id"],
-                    "model": OPENAI_MODEL,
-                    "prediction": calls,
-                    "correct": eval_result["valid"],
-                    "evaluator": "bfcl_ast_checker",
-                    "eval_result": eval_result,
-                    "response_id": response.get("id"),
-                    "usage": response.get("usage"),
-                }
-            )
+            prediction = {
+                "id": example["id"],
+                "model": OPENAI_MODEL,
+                "prediction": calls,
+                "correct": eval_result["valid"],
+                "evaluator": "bfcl_ast_checker",
+                "eval_result": eval_result,
+                "response_id": response.get("id"),
+                "usage": response.get("usage"),
+            }
+            cached_predictions[example["id"]] = prediction
+            append_jsonl(model_predictions_path, prediction)
             print(f"Ran {OPENAI_MODEL} on {example['id']}")
-        write_jsonl(model_predictions_path, model_predictions)
+        else:
+            print(f"Reused {OPENAI_MODEL} on {example['id']}")
+
+    missing_ids = [example["id"] for example in examples if example["id"] not in cached_predictions]
+    if missing_ids:
+        raise SystemExit(f"Missing predictions after baseline run: {missing_ids[:5]}")
+
+    model_predictions = [cached_predictions[example["id"]] for example in examples]
 
     examples_by_id = {example["id"]: example for example in examples}
     rescored_model_predictions = []
