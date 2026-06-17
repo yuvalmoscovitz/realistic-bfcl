@@ -24,6 +24,12 @@ OPENAI_MODEL = "gpt-5.4-nano"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_CONCURRENCY = 8
 OPENAI_MAX_ATTEMPTS = 4
+ROUTER_SYSTEM_INSTRUCTION = (
+    "Call the provided tool that best satisfies the user request. "
+    "Do not answer in prose when a tool call is appropriate."
+)
+ROUTER_TOOL_CHOICE = "required"
+ROUTER_MAX_OUTPUT_TOKENS = 256
 RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
 BFCL_CATEGORY_FILES = {
     "simple_python": (
@@ -170,6 +176,11 @@ def describe_stage(stage: Stage) -> None:
 
 def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def stable_hash(payload: object) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def read_int_setting(path: Path, key: str) -> int:
@@ -407,16 +418,13 @@ def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[st
         "input": [
             {
                 "role": "system",
-                "content": (
-                    "Call the provided tool that best satisfies the user request. "
-                    "Do not answer in prose when a tool call is appropriate."
-                ),
+                "content": ROUTER_SYSTEM_INSTRUCTION,
             },
             {"role": "user", "content": user_content},
         ],
         "tools": tools,
-        "tool_choice": "required",
-        "max_output_tokens": 256,
+        "tool_choice": ROUTER_TOOL_CHOICE,
+        "max_output_tokens": ROUTER_MAX_OUTPUT_TOKENS,
     }
     request = urllib.request.Request(
         OPENAI_RESPONSES_URL,
@@ -520,6 +528,22 @@ def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
     return totals
 
 
+def input_fingerprint(example: dict[str, object]) -> str:
+    return stable_hash(
+        {
+            "model": OPENAI_MODEL,
+            "question": example["question"],
+            "function": example["function"],
+            "ground_truth": example["ground_truth"],
+            "router": {
+                "system": ROUTER_SYSTEM_INSTRUCTION,
+                "tool_choice": ROUTER_TOOL_CHOICE,
+                "max_output_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+            },
+        }
+    )
+
+
 OVERHANG_TEMPLATES = (
     "hey quick one - {prompt}",
     "before i forget, {prompt}",
@@ -544,18 +568,6 @@ IMPATIENT_TEMPLATES = (
     "seriously, {prompt}",
     "come on, {prompt}",
 )
-MOBILE_STOPWORDS = {
-    "calculate",
-    "compute",
-    "determine",
-    "find",
-    "is",
-    "please",
-    "what",
-    "what's",
-}
-
-
 def lowercase_first_alpha(text: str) -> str:
     for index, char in enumerate(text):
         if char.isalpha():
@@ -589,8 +601,7 @@ def mobile_shorthand_prompt(clean_prompt: str, _index: int) -> str:
     text = text.strip()
     text = re.sub(r"[?!]+$", "", text)
     text = re.sub(r"(?<!\d)\.$", "", text)
-    tokens = [token for token in text.split() if token not in MOBILE_STOPWORDS]
-    return " ".join(tokens)
+    return " ".join(text.split())
 
 
 def transform_messages(question: object, index: int, transform: object) -> object:
@@ -667,11 +678,22 @@ def category_metrics(
 def run_or_load_model_predictions(
     examples: list[dict[str, object]], model_predictions_path: Path
 ) -> list[dict[str, object]]:
+    expected_fingerprints = {
+        example["id"]: input_fingerprint(example) for example in examples
+    }
     if model_predictions_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_MODEL_RUN"):
-        cached_predictions = {
-            prediction["id"]: prediction for prediction in read_jsonl(model_predictions_path)
-        }
-        print(f"Loaded {len(cached_predictions)} cached {OPENAI_MODEL} predictions")
+        cached_predictions = {}
+        stale_count = 0
+        for prediction in read_jsonl(model_predictions_path):
+            prediction_id = prediction["id"]
+            if prediction.get("input_fingerprint") != expected_fingerprints.get(prediction_id):
+                stale_count += 1
+                continue
+            cached_predictions[prediction_id] = prediction
+        print(
+            f"Loaded {len(cached_predictions)} cached {OPENAI_MODEL} predictions "
+            f"({stale_count} stale ignored)"
+        )
     else:
         cached_predictions = {}
 
@@ -691,6 +713,7 @@ def run_or_load_model_predictions(
             for future in concurrent.futures.as_completed(futures):
                 example = futures[future]
                 prediction = future.result()
+                prediction["input_fingerprint"] = expected_fingerprints[example["id"]]
                 cached_predictions[example["id"]] = prediction
                 append_jsonl(model_predictions_path, prediction)
                 print(f"Ran {OPENAI_MODEL} on {example['id']}")
@@ -711,6 +734,7 @@ def run_or_load_model_predictions(
         rescored_prediction["correct"] = eval_result["valid"]
         rescored_prediction["evaluator"] = "bfcl_ast_checker"
         rescored_prediction["eval_result"] = eval_result
+        rescored_prediction["input_fingerprint"] = expected_fingerprints[prediction["id"]]
         rescored_predictions.append(rescored_prediction)
     write_jsonl(model_predictions_path, rescored_predictions)
     return rescored_predictions
@@ -890,6 +914,12 @@ def generated_dimensions() -> list[str]:
     if unknown:
         known = ", ".join(DIMENSION_FILES)
         raise SystemExit(f"Unknown dimensions {unknown}. Known dimensions: {known}")
+    missing_artifacts = sorted(set(requested_dimensions) - set(dimensions))
+    if missing_artifacts:
+        raise SystemExit(
+            f"Requested dimensions are not generated: {missing_artifacts}. "
+            "Run the corresponding augment stage first."
+        )
     return [dimension for dimension in dimensions if dimension in requested_dimensions]
 
 
@@ -1073,6 +1103,7 @@ def analysis_review_row(
     clean_examples: dict[str, dict[str, object]],
     noisy_examples: dict[str, dict[str, object]],
     outcome: str,
+    include_noisy_error_type: bool,
 ) -> dict[str, object]:
     clean_example = clean_examples[str(row["base_id"])]
     noisy_example = noisy_examples[str(row["noisy_id"])]
@@ -1083,8 +1114,10 @@ def analysis_review_row(
         "category": row["category"],
         "dimension": row["dimension"],
         "outcome": outcome,
-        "heuristic_error_type": heuristic_error_type(
-            gold, row["clean_prediction"], row["noisy_prediction"]
+        "heuristic_error_type": (
+            heuristic_error_type(gold, row["clean_prediction"], row["noisy_prediction"])
+            if include_noisy_error_type
+            else ""
         ),
         "clean_prompt": conversation_text(clean_example["question"]),
         "noisy_prompt": conversation_text(noisy_example["question"]),
@@ -1115,12 +1148,24 @@ def analyze_dimension(dimension: str) -> dict[str, object]:
     noisy_examples = {row["id"]: row for row in read_jsonl(noisy_path)}
 
     regressions = [
-        analysis_review_row(row, clean_examples, noisy_examples, "clean_success_noisy_failure")
+        analysis_review_row(
+            row,
+            clean_examples,
+            noisy_examples,
+            "clean_success_noisy_failure",
+            include_noisy_error_type=True,
+        )
         for row in paired_rows
         if row["clean_correct"] and not row["noisy_correct"]
     ]
     recoveries = [
-        analysis_review_row(row, clean_examples, noisy_examples, "clean_failure_noisy_success")
+        analysis_review_row(
+            row,
+            clean_examples,
+            noisy_examples,
+            "clean_failure_noisy_success",
+            include_noisy_error_type=False,
+        )
         for row in paired_rows
         if not row["clean_correct"] and row["noisy_correct"]
     ]
@@ -1176,7 +1221,6 @@ def analyze_dimension(dimension: str) -> dict[str, object]:
             "recoveries": {
                 "total": len(recoveries),
                 "by_category": count_by(recoveries, "category"),
-                "by_heuristic_error_type": count_by(recoveries, "heuristic_error_type"),
                 "jsonl": recoveries_jsonl_path.relative_to(REPO_ROOT).as_posix(),
             },
             "stable_successes": len(stable_successes),
