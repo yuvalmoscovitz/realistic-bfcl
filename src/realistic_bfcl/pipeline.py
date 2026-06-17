@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BFCL_COMMIT = "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
 BFCL_REPOSITORY = "https://github.com/ShishirPatil/gorilla"
+BFCL_CATEGORY_FILES = {
+    "simple_python": (
+        "BFCL_v4_simple_python.json",
+        "possible_answer/BFCL_v4_simple_python.json",
+    )
+}
 
 
 @dataclass(frozen=True)
@@ -128,6 +135,30 @@ def read_int_setting(path: Path, key: str) -> int:
     raise SystemExit(f"Missing required setting '{key}' in {path.relative_to(REPO_ROOT)}")
 
 
+def read_list_setting(path: Path, key: str) -> list[str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    values: list[str] = []
+    in_block = False
+    prefix = f"{key}:"
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            after_colon = stripped.split(":", 1)[1].strip()
+            if after_colon == "[]":
+                return []
+            in_block = True
+            continue
+        if in_block:
+            if stripped.startswith("- "):
+                values.append(stripped[2:].strip())
+                continue
+            if stripped and not line.startswith(" "):
+                break
+
+    return values
+
+
 def reject_placeholders(paths: tuple[Path, ...]) -> None:
     for path in paths:
         text = path.read_text(encoding="utf-8")
@@ -142,8 +173,65 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def bfcl_data_root() -> Path:
+    root = os.environ.get("REALISTIC_BFCL_BFCL_ROOT")
+    if root:
+        return Path(root) / "berkeley-function-call-leaderboard/bfcl_eval/data"
+    default_root = Path(
+        "/tmp/gorilla-bfcl-inspect/berkeley-function-call-leaderboard/bfcl_eval/data"
+    )
+    if default_root.exists():
+        return default_root
+    raise SystemExit(
+        "Set REALISTIC_BFCL_BFCL_ROOT to a checkout of "
+        "https://github.com/ShishirPatil/gorilla at the pinned commit."
+    )
+
+
+def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
+    categories = read_list_setting(subset_config, "bfcl_categories")
+    max_examples = read_int_setting(subset_config, "max_examples")
+    data_root = bfcl_data_root()
+    rows: list[dict[str, object]] = []
+
+    for category in categories:
+        question_file, answer_file = BFCL_CATEGORY_FILES[category]
+        questions = read_jsonl(data_root / question_file)
+        answers = {row["id"]: row for row in read_jsonl(data_root / answer_file)}
+        for question in questions:
+            answer = answers[question["id"]]
+            rows.append(
+                {
+                    "id": question["id"],
+                    "category": category,
+                    "question": question["question"],
+                    "function": question["function"],
+                    "ground_truth": answer["ground_truth"],
+                }
+            )
+            if len(rows) >= max_examples:
+                break
+        if len(rows) >= max_examples:
+            break
+
+    subset_path = manifest_path.parent / "clean_subset.jsonl"
+    write_jsonl(subset_path, rows)
+    return subset_path
 
 
 def freeze_bfcl() -> None:
@@ -151,6 +239,8 @@ def freeze_bfcl() -> None:
     subset_config = REPO_ROOT / "configs/subsets/smoke.yaml"
     manifest_path = REPO_ROOT / "artifacts/frozen/bfcl_manifest.json"
     reject_placeholders((project_config, subset_config))
+    categories = read_list_setting(subset_config, "bfcl_categories")
+    subset_path = materialize_smoke_subset(subset_config, manifest_path)
 
     write_json(
         manifest_path,
@@ -164,8 +254,12 @@ def freeze_bfcl() -> None:
             "clean_subset": {
                 "config_path": "configs/subsets/smoke.yaml",
                 "config_sha256": file_sha256(subset_config),
+                "categories": categories,
                 "max_examples": read_int_setting(subset_config, "max_examples"),
-                "status": "configured_not_materialized",
+                "materialized_path": "artifacts/frozen/clean_subset.jsonl",
+                "materialized_sha256": file_sha256(subset_path),
+                "materialized_total": len(read_jsonl(subset_path)),
+                "status": "materialized",
             },
             "local_configs": {
                 "project_yaml_sha256": file_sha256(project_config),
@@ -175,11 +269,10 @@ def freeze_bfcl() -> None:
                 "status": "not_configured",
                 "models": [],
             },
-            "status": "source_pinned_subset_pending",
+            "status": "source_pinned_subset_materialized",
             "notes": [
-                "This pins the BFCL upstream commit and hashes the local subset definition.",
-                "The subset examples still need to be materialized from BFCL before "
-                "model evaluation.",
+                "This pins the BFCL upstream commit and materializes the local smoke subset.",
+                "Model API evaluation is still pending; clean-baseline runs oracle replay only.",
             ],
         },
     )
@@ -188,33 +281,47 @@ def freeze_bfcl() -> None:
 
 def clean_baseline() -> None:
     manifest_path = REPO_ROOT / "artifacts/frozen/bfcl_manifest.json"
+    subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     result_path = REPO_ROOT / "artifacts/results/clean/clean_baseline_summary.json"
+    predictions_path = REPO_ROOT / "artifacts/results/clean/oracle_replay_predictions.jsonl"
 
     if not manifest_path.exists():
         raise SystemExit("Missing artifacts/frozen/bfcl_manifest.json. Run freeze-bfcl first.")
+    if not subset_path.exists():
+        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    examples = read_jsonl(subset_path)
+    predictions = [
+        {
+            "id": example["id"],
+            "model": "oracle_replay",
+            "prediction": example["ground_truth"],
+            "correct": True,
+        }
+        for example in examples
+    ]
+    write_jsonl(predictions_path, predictions)
+
     write_json(
         result_path,
         {
             "created_at": utc_now(),
             "stage": "clean-baseline",
-            "status": "not_run",
-            "reason": (
-                "BFCL subset materialization, evaluator adapter, and model list are not wired yet."
-            ),
+            "status": "ran_oracle_replay",
+            "reason": "Oracle replay validates subset loading, gold alignment, and result saving.",
             "bfcl_manifest": "artifacts/frozen/bfcl_manifest.json",
             "bfcl_dataset_commit": manifest["bfcl"]["dataset_commit"],
-            "models": [],
+            "predictions": "artifacts/results/clean/oracle_replay_predictions.jsonl",
+            "models": ["oracle_replay"],
             "metrics": {
-                "clean_total": 0,
-                "clean_correct": 0,
-                "clean_accuracy": None,
+                "clean_total": len(predictions),
+                "clean_correct": len(predictions),
+                "clean_accuracy": 1.0 if predictions else None,
             },
             "next_required_work": [
-                "Materialize the smoke subset from the pinned BFCL commit.",
                 "Add the BFCL evaluator adapter.",
-                "Configure the model list before recording clean accuracy.",
+                "Configure the real model list before recording model clean accuracy.",
             ],
         },
     )

@@ -1,7 +1,8 @@
 subset:
   name: smoke
   purpose: Minimal subset used to validate BFCL evaluator wiring before scaling.
-  bfcl_categories: []
+  bfcl_categories:
+    - simple_python
   max_examples: 50
   selection:
     deterministic: true

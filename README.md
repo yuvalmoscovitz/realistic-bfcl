@@ -76,6 +76,10 @@ To dry-run a stage and see its expected inputs and outputs:
 python scripts/run_stage.py clean-baseline --dry-run
 ```
 
+`freeze-bfcl` expects access to a checkout of the pinned BFCL upstream repository.
+Set `REALISTIC_BFCL_BFCL_ROOT=/path/to/gorilla` when the checkout is not in the
+default local inspection path.
+
 ## Immediate Milestones
 
 1. Pin BFCL dataset commit, evaluator version, model list, and clean subset.
