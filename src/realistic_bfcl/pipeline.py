@@ -28,7 +28,19 @@ BFCL_CATEGORY_FILES = {
     "simple_python": (
         "BFCL_v4_simple_python.json",
         "possible_answer/BFCL_v4_simple_python.json",
-    )
+    ),
+    "multiple": (
+        "BFCL_v4_multiple.json",
+        "possible_answer/BFCL_v4_multiple.json",
+    ),
+    "parallel": (
+        "BFCL_v4_parallel.json",
+        "possible_answer/BFCL_v4_parallel.json",
+    ),
+    "parallel_multiple": (
+        "BFCL_v4_parallel_multiple.json",
+        "possible_answer/BFCL_v4_parallel_multiple.json",
+    ),
 }
 
 
@@ -471,6 +483,29 @@ def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
     return totals
 
 
+def accuracy_metrics(predictions: list[dict[str, object]]) -> dict[str, object]:
+    correct = sum(1 for prediction in predictions if prediction["correct"])
+    total = len(predictions)
+    return {
+        "clean_total": total,
+        "clean_correct": correct,
+        "clean_accuracy": correct / total if total else None,
+    }
+
+
+def category_metrics(
+    predictions: list[dict[str, object]], examples_by_id: dict[str, dict[str, object]]
+) -> dict[str, dict[str, object]]:
+    by_category: dict[str, list[dict[str, object]]] = {}
+    for prediction in predictions:
+        category = str(examples_by_id[prediction["id"]]["category"])
+        by_category.setdefault(category, []).append(prediction)
+    return {
+        category: accuracy_metrics(category_predictions)
+        for category, category_predictions in sorted(by_category.items())
+    }
+
+
 def run_openai_prediction(example: dict[str, object], api_key: str) -> dict[str, object]:
     response = call_openai_tool_router(example, api_key)
     calls = response_function_calls(response, tool_name_map(example))
@@ -605,7 +640,10 @@ def clean_baseline() -> None:
         rescored_model_predictions.append(rescored_prediction)
     model_predictions = rescored_model_predictions
     write_jsonl(model_predictions_path, model_predictions)
-    model_correct = sum(1 for prediction in model_predictions if prediction["correct"])
+    oracle_metrics = accuracy_metrics(predictions)
+    model_metrics = accuracy_metrics(model_predictions)
+    oracle_metrics["usage"] = {}
+    model_metrics["usage"] = aggregate_usage(model_predictions)
 
     write_json(
         result_path,
@@ -622,20 +660,12 @@ def clean_baseline() -> None:
             },
             "models": ["oracle_replay", OPENAI_MODEL],
             "metrics": {
-                "oracle_replay": {
-                    "clean_total": len(predictions),
-                    "clean_correct": len(predictions),
-                    "clean_accuracy": 1.0 if predictions else None,
-                    "usage": {},
-                },
-                OPENAI_MODEL: {
-                    "clean_total": len(model_predictions),
-                    "clean_correct": model_correct,
-                    "clean_accuracy": model_correct / len(model_predictions)
-                    if model_predictions
-                    else None,
-                    "usage": aggregate_usage(model_predictions),
-                },
+                "oracle_replay": oracle_metrics,
+                OPENAI_MODEL: model_metrics,
+            },
+            "category_metrics": {
+                "oracle_replay": category_metrics(predictions, examples_by_id),
+                OPENAI_MODEL: category_metrics(model_predictions, examples_by_id),
             },
             "next_required_work": [
                 "Compare this clean baseline against noisy variants.",
