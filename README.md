@@ -38,7 +38,11 @@ docs/
   realism_contract.md          Validity rules and rejection criteria.
   evaluation_metrics.md        Paired metrics and error taxonomy.
 src/realistic_bfcl/
-  pipeline.py                  Dataset construction, evaluation, and analysis code.
+  augment.py                   Noisy dataset construction and invariant checks.
+  evaluate.py                  BFCL/OpenAI evaluation, scoring, cache, pairing.
+  analyze.py                   Degradation metrics and regression review files.
+  common.py                    Shared constants and small file/config helpers.
+  pipeline.py                  Thin CLI orchestration for the four research steps.
   contracts.py                 Lightweight data contracts for examples.
 scripts/
   run_stage.py                 Single entry point for research steps.
