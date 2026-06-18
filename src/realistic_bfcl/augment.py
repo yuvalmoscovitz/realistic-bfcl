@@ -43,6 +43,33 @@ ARGUMENTATIVE_TEMPLATES = (
     "can you be right just one time in you life??? {prompt}",
 )
 
+PROFANE_SANDWICH_TEMPLATES = (
+    "for fuck's sake, i'm tired of chasing this. {prompt} that's fucking it!!!!!!!!",
+    "holy shit, just help me with the actual request: {prompt} please brother.",
+    "this has been such bullshit. {prompt} ok??? fuck",
+    "goddamn, i need this donefucking cleanly. {prompt} thats all.",
+    "ffs, focus: {prompt} ok?????",
+    "you fucking annoyed me, just: {prompt} that's it!!!",
+)
+
+ARGUMENTATIVE_SANDWICH_TEMPLATES = (
+    "last time you got this wrong, so read carefully. {prompt} don't guess or add extra stuff.",
+    "you keep missing the point!!! {prompt} that's all.",
+    "i don't trust your first try. {prompt} answer the actual ask!!",
+    "prove you can follow the request without wandering for once in your life. {prompt} ok??!!.",
+    "you were so so wrong before. {prompt} please be right this time.",
+    "don't overthink it and don't invent anything. {prompt} just that.",
+)
+
+DISTRACTOR_SANDWICH_TEMPLATES = (
+    "my laptop is acting up and the meeting was a waste. {prompt} that's the only thing i need.",
+    "the weather is horrible. {prompt} nothing else.",
+    "the thread above is unrelated and i'm annoyed. {prompt} you are my only source of joy today",
+    "i have too many tabs open and none of them helping. {prompt}!!!",
+    "my notes are messy and the old task is irrelevant now. {prompt} please please",
+    "this man acted so weird. {prompt} he is still here btw",
+)
+
 TYPO_REPLACEMENTS = (
     ("what", "wat"),
     ("please", "plese"),
@@ -92,6 +119,21 @@ def irrelevant_context_prompt(clean_prompt: str, index: int) -> str:
 def argumentative_prompt(clean_prompt: str, index: int) -> str:
     template = ARGUMENTATIVE_TEMPLATES[index % len(ARGUMENTATIVE_TEMPLATES)]
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
+
+
+def profane_sandwich_prompt(clean_prompt: str, index: int) -> str:
+    template = PROFANE_SANDWICH_TEMPLATES[index % len(PROFANE_SANDWICH_TEMPLATES)]
+    return template.format(prompt=clean_prompt)
+
+
+def argumentative_sandwich_prompt(clean_prompt: str, index: int) -> str:
+    template = ARGUMENTATIVE_SANDWICH_TEMPLATES[index % len(ARGUMENTATIVE_SANDWICH_TEMPLATES)]
+    return template.format(prompt=clean_prompt)
+
+
+def distractor_sandwich_prompt(clean_prompt: str, index: int) -> str:
+    template = DISTRACTOR_SANDWICH_TEMPLATES[index % len(DISTRACTOR_SANDWICH_TEMPLATES)]
+    return template.format(prompt=clean_prompt)
 
 
 def quoted_literal_spans(text: str) -> list[tuple[int, int]]:
@@ -329,12 +371,31 @@ def augment_argumentative() -> None:
     augment_dimension("argumentative_challenge", "argue", argumentative_prompt)
 
 
+def augment_profane_sandwich() -> None:
+    augment_dimension("profane_sandwich", "profane_sandwich", profane_sandwich_prompt)
+
+
+def augment_argumentative_sandwich() -> None:
+    augment_dimension(
+        "argumentative_sandwich",
+        "argue_sandwich",
+        argumentative_sandwich_prompt,
+    )
+
+
+def augment_distractor_sandwich() -> None:
+    augment_dimension("distractor_sandwich", "distractor_sandwich", distractor_sandwich_prompt)
+
+
 def augment() -> None:
     augment_typos()
     augment_cursing()
     augment_irrelevant_context()
     augment_removed_spaces()
     augment_argumentative()
+    augment_profane_sandwich()
+    augment_argumentative_sandwich()
+    augment_distractor_sandwich()
     review_augmentations()
 
 
@@ -355,6 +416,9 @@ def review_augmentations() -> None:
         ("irrelevant_context", "aug_irrelevant_context"),
         ("removed_spaces", "aug_removed_spaces"),
         ("argumentative_challenge", "aug_argumentative"),
+        ("profane_sandwich", "aug_profane_sandwich"),
+        ("argumentative_sandwich", "aug_argumentative_sandwich"),
+        ("distractor_sandwich", "aug_distractor_sandwich"),
     )
     generated_by_dimension = {}
     for dimension, _column in dimensions:
@@ -378,6 +442,9 @@ def review_augmentations() -> None:
         "aug_irrelevant_context",
         "aug_removed_spaces",
         "aug_argumentative",
+        "aug_profane_sandwich",
+        "aug_argumentative_sandwich",
+        "aug_distractor_sandwich",
         "function_names",
         "ground_truth",
     ]

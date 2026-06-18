@@ -51,6 +51,9 @@ Current dimensions:
 - `irrelevant_context`
 - `removed_spaces`
 - `argumentative_challenge`
+- `profane_sandwich`
+- `argumentative_sandwich`
+- `distractor_sandwich`
 
 Primary outputs:
 - `artifacts/generated/*.jsonl`

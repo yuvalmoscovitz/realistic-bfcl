@@ -25,6 +25,9 @@ generation:
     - irrelevant_context
     - removed_spaces
     - argumentative_challenge
+    - profane_sandwich
+    - argumentative_sandwich
+    - distractor_sandwich
   rejected_by_default:
     - adversarial_word_games
     - random_typos_without_human_plausibility

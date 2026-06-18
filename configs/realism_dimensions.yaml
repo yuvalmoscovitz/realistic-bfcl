@@ -82,3 +82,54 @@ dimensions:
       - asks the model to debate instead of route the tool call
       - changes the requested action
       - adds a new constraint or alternate answer target
+
+  profane_sandwich:
+    status: pilot
+    description: Add realistic profanity before and after the exact clean request.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - profanity
+      - impatience
+      - short trailing emphasis that does not add constraints
+    rejection_rules:
+      - changes any oracle-bearing text
+      - adds a second actionable request
+      - adds a new deadline, preference, or output format
+
+  argumentative_sandwich:
+    status: pilot
+    description: Add skeptical or argumentative text around the exact clean request.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - distrustful framing
+      - pressure to be correct
+      - instruction not to guess
+    rejection_rules:
+      - asks the model to debate instead of route the tool call
+      - changes the requested action
+      - adds a new constraint or alternate answer target
+
+  distractor_sandwich:
+    status: pilot
+    description: Add unrelated stale context before and after the exact clean request.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - unrelated daily context
+      - stale background that is explicitly inactive
+      - short focus reminders
+    rejection_rules:
+      - adds a second actionable request
+      - changes any argument value
+      - makes multiple tool calls plausible when the clean oracle has one
