@@ -1457,6 +1457,54 @@ def analyze_dimension(dimension: str) -> dict[str, object]:
     }
 
 
+def flip_review_rows(dimension: str) -> list[dict[str, object]]:
+    paired_path = (
+        REPO_ROOT
+        / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
+    )
+    clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
+
+    paired_rows = read_jsonl(paired_path)
+    clean_examples = {row["id"]: row for row in read_jsonl(clean_path)}
+    noisy_examples = {row["id"]: row for row in read_jsonl(noisy_path)}
+    review_rows = []
+    for row in paired_rows:
+        if row["clean_correct"] and row["noisy_correct"]:
+            continue
+        if row["clean_correct"] and not row["noisy_correct"]:
+            outcome = "clean_success_noisy_failure"
+            include_noisy_error_type = True
+        elif not row["clean_correct"] and row["noisy_correct"]:
+            outcome = "clean_failure_noisy_success"
+            include_noisy_error_type = False
+        else:
+            outcome = "both_wrong"
+            include_noisy_error_type = True
+        review = analysis_review_row(
+            row,
+            clean_examples,
+            noisy_examples,
+            outcome,
+            include_noisy_error_type=include_noisy_error_type,
+        )
+        review_rows.append(
+            {
+                **review,
+                "clean_correct": row["clean_correct"],
+                "noisy_correct": row["noisy_correct"],
+                "gold": json.dumps(review["gold"], sort_keys=True),
+                "clean_prediction": json.dumps(
+                    review["clean_prediction"], sort_keys=True
+                ),
+                "noisy_prediction": json.dumps(
+                    review["noisy_prediction"], sort_keys=True
+                ),
+            }
+        )
+    return review_rows
+
+
 def analyze() -> None:
     dimensions = [
         dimension
@@ -1468,6 +1516,29 @@ def analyze() -> None:
     if not dimensions:
         raise SystemExit("No paired results found. Run paired-eval first.")
     summaries = [analyze_dimension(dimension) for dimension in dimensions]
+    flip_rows = []
+    for dimension in dimensions:
+        flip_rows.extend(flip_review_rows(dimension))
+    flip_review_path = REPO_ROOT / "artifacts/analysis/flip_review.csv"
+    write_csv(
+        flip_review_path,
+        flip_rows,
+        [
+            "base_id",
+            "noisy_id",
+            "category",
+            "dimension",
+            "outcome",
+            "heuristic_error_type",
+            "clean_correct",
+            "noisy_correct",
+            "clean_prompt",
+            "noisy_prompt",
+            "gold",
+            "clean_prediction",
+            "noisy_prediction",
+        ],
+    )
     write_json(
         REPO_ROOT / "artifacts/analysis/summary.json",
         {
@@ -1475,8 +1546,10 @@ def analyze() -> None:
             "stage": "analyze",
             "model": OPENAI_MODEL,
             "dimensions": summaries,
+            "flip_review_csv": flip_review_path.relative_to(REPO_ROOT).as_posix(),
         },
     )
+    print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
 
 
 def run_stage(stage: Stage, dry_run: bool) -> None:
