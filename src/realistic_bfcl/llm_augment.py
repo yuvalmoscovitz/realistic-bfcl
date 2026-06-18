@@ -236,7 +236,7 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
     def generate_one(index_and_example: tuple[int, dict[str, object]]) -> dict[str, object]:
         index, example = index_and_example
         last_errors = []
-        for attempt in range(1, 7):
+        for attempt in range(1, 13):
             try:
                 payload = call_llm_augmenter(example, dimension)
             except RuntimeError as error:
@@ -264,7 +264,7 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
             "messages": [],
             "payload": {},
             "validation_errors": last_errors,
-            "attempt": 6,
+            "attempt": 12,
         }
 
     indexed_examples = list(enumerate(examples))
@@ -275,10 +275,34 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
             result = future.result()
             example = result["example"]
             if result["validation_errors"]:
-                raise RuntimeError(
-                    f"{dimension.name} failed validation for {example['id']}: "
+                review_rows.append(
+                    {
+                        "dimension": dimension.name,
+                        "base_id": example["id"],
+                        "category": example["category"],
+                        "clean_prompt": conversation_text(example["question"]),
+                        "augmented_prompt": "",
+                        "function_names": ", ".join(
+                            str(function["name"]) for function in example["function"]
+                        ),
+                        "ground_truth": json.dumps(
+                            example["ground_truth"],
+                            ensure_ascii=False,
+                        ),
+                        "oracle_preservation_notes": "",
+                        "distractors_added": "[]",
+                        "risk_flags": json.dumps(
+                            result["validation_errors"],
+                            ensure_ascii=False,
+                        ),
+                        "review_status": "rejected_auto",
+                    }
+                )
+                print(
+                    f"Skipped {dimension.name} for {example['id']}: "
                     + "; ".join(result["validation_errors"])
                 )
+                continue
             question = [result["messages"]]
             rows.append(
                 {
@@ -359,7 +383,7 @@ def augment_llm_pilot() -> None:
     if not subset_path.exists():
         raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run prepare-subset first.")
 
-    examples = read_jsonl(subset_path)
+    examples = select_llm_examples(read_jsonl(subset_path))
     limit = optional_positive_int_env("REALISTIC_BFCL_LLM_AUGMENT_LIMIT") or 50
     examples = examples[:limit]
     print(
@@ -378,3 +402,31 @@ def augment_llm_pilot() -> None:
             raise SystemExit(f"Unknown LLM augmentation dimensions: {sorted(missing)}")
     for dimension in dimensions:
         generate_dimension(dimension, examples)
+
+
+def select_llm_examples(examples: list[dict[str, object]]) -> list[dict[str, object]]:
+    selection = os.environ.get("REALISTIC_BFCL_LLM_SELECTION", "first").strip()
+    if selection == "first":
+        return examples
+    if selection == "hard_many_tools":
+        priority = {
+            "live_parallel_multiple": 0,
+            "live_parallel": 1,
+            "live_multiple": 2,
+            "parallel_multiple": 3,
+            "parallel": 4,
+            "multiple": 5,
+            "live_simple": 6,
+            "simple_python": 7,
+        }
+        return sorted(
+            examples,
+            key=lambda example: (
+                -len(example["function"]),
+                priority.get(str(example["category"]), 99),
+                str(example["id"]),
+            ),
+        )
+    raise SystemExit(
+        "REALISTIC_BFCL_LLM_SELECTION must be one of: first, hard_many_tools."
+    )
