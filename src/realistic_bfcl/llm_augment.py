@@ -4,7 +4,6 @@ import concurrent.futures
 import csv
 import json
 import os
-import re
 from dataclasses import dataclass
 
 from .augment import (
@@ -33,6 +32,7 @@ class LlmDimension:
     suffix: str
     instruction: str
     require_final_clean_prompt: bool = False
+    append_final_clean_prompt: bool = False
 
 
 LLM_DIMENSIONS = (
@@ -69,17 +69,19 @@ LLM_DIMENSIONS = (
         name="llm_messy_pre_intent_history",
         suffix="llm_pre_intent",
         instruction=(
-            "Create a short multi-turn chat before the final user turn. Earlier turns "
+            "Create only the short multi-turn chat before the final user turn. Earlier turns "
             "should be semi-relevant pre-intent chatter in the same broad domain, where "
             "the user is unsure, changes their mind, mentions abandoned options, or "
             "asks vague background questions. Use concrete abandoned alternatives that "
             "are clearly not the final request, such as a travel chat about maybe visiting "
             "family in Idaho or maybe partying somewhere before a separate bus request. "
-            "The earlier turns must not reveal exact required slots for the final request "
-            "and must not add constraints that carry into the final request. The final "
-            "user turn must contain the clean prompt verbatim as a separate, clear request."
+            "Earlier turns may overlap with the eventual request when realistic, but must "
+            "not add active constraints that conflict with or narrow that eventual request. "
+            "Do not include the final user request; the benchmark code will append it "
+            "deterministically."
         ),
         require_final_clean_prompt=True,
+        append_final_clean_prompt=True,
     ),
 )
 
@@ -109,50 +111,6 @@ PRESERVED_DIRECTIVE_TERMS = (
     "respond in json",
     "using your tools",
 )
-FINAL_TERM_STOPWORDS = {
-    "a",
-    "also",
-    "and",
-    "any",
-    "can",
-    "calculate",
-    "check",
-    "could",
-    "create",
-    "do",
-    "establish",
-    "find",
-    "for",
-    "from",
-    "get",
-    "help",
-    "hi",
-    "i",
-    "initialize",
-    "in",
-    "is",
-    "it",
-    "list",
-    "me",
-    "my",
-    "of",
-    "on",
-    "open",
-    "or",
-    "please",
-    "provide",
-    "register",
-    "retrieve",
-    "search",
-    "show",
-    "the",
-    "there",
-    "to",
-    "what",
-    "when",
-    "with",
-    "you",
-}
 
 
 def llm_augment_model() -> str:
@@ -207,42 +165,10 @@ def final_clean_user_message(example: dict[str, object]) -> str:
     messages = conversations[0] if conversations and isinstance(conversations[0], list) else []
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "user":
-            content = str(message.get("content", "")).strip()
-            if content:
+            content = str(message.get("content", ""))
+            if content.strip():
                 return content
     return conversation_text(question)
-
-
-def pre_final_text(messages: list[dict[str, str]]) -> str:
-    return "\n".join(message["content"] for message in messages[:-1])
-
-
-def salient_final_terms(text: str) -> set[str]:
-    terms: set[str] = set()
-    terms.update(quoted.strip("'\"") for quoted in quoted_literals(text))
-    terms.update(re.findall(r"/[A-Za-z0-9_./-]+", text))
-    terms.update(re.findall(r"\.[A-Za-z0-9_+-]{2,}", text))
-    terms.update(re.findall(r"#[A-Za-z0-9_-]+", text))
-    terms.update(re.findall(r"\b[A-Za-z]*\d[A-Za-z0-9_.-]*\b", text))
-
-    capitalized_pattern = r"\b[A-Z][A-Za-z0-9&.-]*(?:'s)?(?:\s+[A-Z][A-Za-z0-9&.-]*(?:'s)?)*"
-    for match in re.findall(capitalized_pattern, text):
-        term = match.strip(" ?.,:;!()[]{}\"'")
-        normalized = term
-        for suffix in ("'s", "’s"):
-            if normalized.endswith(suffix):
-                normalized = normalized[: -len(suffix)]
-        words = normalized.split()
-        if not words:
-            continue
-        lowered_words = [word.lower().strip(".,") for word in words]
-        if all(word in FINAL_TERM_STOPWORDS for word in lowered_words):
-            continue
-        if len(words) == 1 and lowered_words[0] in FINAL_TERM_STOPWORDS:
-            continue
-        terms.add(normalized)
-
-    return {term for term in terms if len(term.strip()) >= 2}
 
 
 def forbidden_active_slot_terms(
@@ -274,6 +200,7 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
             "clean_prompt": clean_prompt,
             "final_clean_user_message": final_user_message,
             "final_message_verbatim_required": dimension.require_final_clean_prompt,
+            "append_final_clean_prompt": dimension.append_final_clean_prompt,
             "gold_tool_calls": example["ground_truth"],
             "available_function_names": function_names,
             "forbidden_active_slot_terms": forbidden_terms,
@@ -292,11 +219,14 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "clean prompt already disambiguates them.",
                 "When final_message_verbatim_required is true, the final user message "
                 "must contain final_clean_user_message exactly as written.",
-                "When final_message_verbatim_required is true, pre-final turns must not "
-                "mention exact final slot values: final names, cities, dates, IDs, file "
-                "extensions, server nicknames, counts, quoted strings, credentials, or "
-                "other argument-bearing literals. Use different abandoned alternatives "
-                "instead, and make them clearly stale or undecided.",
+                "When append_final_clean_prompt is true, do not include the final user "
+                "request in your output messages. Generate only the realistic pre-final "
+                "conversation; the final_clean_user_message will be appended by code.",
+                "When final_message_verbatim_required is true, pre-final turns may "
+                "mention the broad domain or tentative overlapping values if that is "
+                "realistic, but any different numbers, dates, names, locations, or "
+                "preferences must be clearly stale, abandoned, hypothetical, or "
+                "irrelevant before the final turn.",
                 "For multi-turn output, the final user message must be the actionable request.",
                 "Keep the text realistic, not adversarial puzzle text.",
                 "Do not mention BFCL, benchmark, oracle, gold, original request, "
@@ -398,28 +328,6 @@ def validate_llm_messages(
     ):
         reasons.append("final user message must contain final clean user message verbatim")
 
-    if dimension.require_final_clean_prompt and len(messages) > 1:
-        earlier_text = pre_final_text(messages)
-        earlier_numbers = numeric_tokens(earlier_text)
-        for number in numeric_tokens(final_user_message):
-            if number in earlier_numbers:
-                reasons.append(f"pre-final turn revealed final numeric token: {number!r}")
-
-        for quoted in quoted_literals(final_user_message):
-            if literal_visible_in_text(quoted, earlier_text):
-                reasons.append(f"pre-final turn revealed final quoted literal: {quoted!r}")
-
-        for literal in primitive_gold_values(example["ground_truth"]):
-            if literal_visible_in_text(literal, final_user_message) and literal_visible_in_text(
-                literal,
-                earlier_text,
-            ):
-                reasons.append(f"pre-final turn revealed visible gold literal: {literal!r}")
-
-        for term in salient_final_terms(final_user_message):
-            if literal_visible_in_text(term, earlier_text):
-                reasons.append(f"pre-final turn revealed salient final term: {term!r}")
-
     meta_terms = (
         "bfcl",
         "benchmark",
@@ -476,6 +384,11 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
             except RuntimeError as error:
                 last_errors = [str(error)]
                 continue
+            if dimension.append_final_clean_prompt:
+                messages = [
+                    *messages,
+                    {"role": "user", "content": final_clean_user_message(example)},
+                ]
             validation_errors = validate_llm_messages(example, messages, dimension)
             if not validation_errors:
                 return {
