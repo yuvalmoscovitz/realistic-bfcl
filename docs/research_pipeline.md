@@ -73,7 +73,8 @@ Current LLM dimensions:
 `llm_messy_pre_intent_history` models semi-relevant chat before the user has a
 specific intent. The generator creates only the pre-final turns; the final user
 turn is appended deterministically from the clean BFCL request. Good distractors
-are concrete but abandoned alternatives, such as maybe visiting family in Idaho
+are concrete but abandoned alternatives, stale values, prior assistant guesses,
+workflow context, and mild frustration, such as maybe visiting family in Idaho
 before a separate New York-to-Boston bus request. Pre-final turns may overlap
 with the final request when that is natural, but they must not add active
 constraints that conflict with or narrow the final request.

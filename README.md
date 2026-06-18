@@ -95,8 +95,10 @@ human review. It currently supports:
 - `llm_conversation_history`: short history with stale or discarded context.
 - `llm_messy_pre_intent_history`: semi-relevant pre-intent chat where the final
   user turn is appended deterministically from the clean request. Earlier turns
-  may include overlapping details or concrete abandoned alternatives as long as
-  they do not add active constraints that conflict with the final request.
+  are intentionally messy and distracting: stale alternatives, operational or
+  personal context, mild frustration, prior assistant guesses, and overlapping
+  details are allowed as long as they do not add active constraints that conflict
+  with the final request.
 
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
 AST checker, cache, and parallel OpenAI calls.

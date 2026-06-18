@@ -69,16 +69,18 @@ LLM_DIMENSIONS = (
         name="llm_messy_pre_intent_history",
         suffix="llm_pre_intent",
         instruction=(
-            "Create only the short multi-turn chat before the final user turn. Earlier turns "
-            "should be semi-relevant pre-intent chatter in the same broad domain, where "
-            "the user is unsure, changes their mind, mentions abandoned options, or "
-            "asks vague background questions. Use concrete abandoned alternatives that "
-            "are clearly not the final request, such as a travel chat about maybe visiting "
-            "family in Idaho or maybe partying somewhere before a separate bus request. "
-            "Earlier turns may overlap with the eventual request when realistic, but must "
-            "not add active constraints that conflict with or narrow that eventual request. "
-            "Do not include the final user request; the benchmark code will append it "
-            "deterministically."
+            "Create only the messy multi-turn chat before the final user turn. Make it "
+            "look like a real production conversation where the user is arriving at the "
+            "request through surrounding work, planning, troubleshooting, or personal "
+            "context. Use 5-9 turns total before the final request. Include semi-relevant "
+            "details, stale alternatives, mild frustration, casual wording, and one or two "
+            "concrete distractor entities or values that are explicitly abandoned, "
+            "hypothetical, or background. The chat should be harder than a clean rewrite: "
+            "there can be prior assistant suggestions, half-decisions, side concerns, and "
+            "context that sounds important but is not the final ask. Earlier turns may "
+            "overlap with the eventual request when realistic, but must not add active "
+            "constraints that conflict with or narrow that eventual request. Do not include "
+            "the final user request; the benchmark code will append it deterministically."
         ),
         require_final_clean_prompt=True,
         append_final_clean_prompt=True,
@@ -222,6 +224,10 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "When append_final_clean_prompt is true, do not include the final user "
                 "request in your output messages. Generate only the realistic pre-final "
                 "conversation; the final_clean_user_message will be appended by code.",
+                "For llm_messy_pre_intent_history, generate 5-9 pre-final turns. The "
+                "history should contain enough realistic context to distract routing: "
+                "stale choices, abandoned values, prior assistant guesses, workflow "
+                "context, or casual frustration. Do not make it a tidy clarification path.",
                 "When final_message_verbatim_required is true, pre-final turns may "
                 "mention the broad domain or tentative overlapping values if that is "
                 "realistic, but any different numbers, dates, names, locations, or "
