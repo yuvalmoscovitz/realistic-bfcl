@@ -1,43 +1,24 @@
 dimensions:
-  conversational_overhang:
+  typos:
     status: planned
-    description: Add realistic irrelevant conversational context before or after the clean request.
+    description: Add one or two small human typos while preserving the request.
     must_preserve:
       - function_name
       - all_required_arguments
       - argument_values
       - tool_schema
     allowed_noise:
-      - background context that does not constrain the tool call
-      - casual tone
-      - mild impatience
-      - natural filler
+      - swapped adjacent letters
+      - missing letter in a common word
+      - misspelled non-value words
     rejection_rules:
-      - adds a new constraint not present in the clean prompt
-      - weakens or removes a required constraint
-      - makes multiple tool calls plausible when the clean oracle has one
+      - changes a number, unit, date, entity, path, or quoted value
+      - makes the requested action ambiguous
+      - adds or removes a constraint
 
-  casual_mobile_shorthand:
+  cursing:
     status: planned
-    description: Compress clean requests into lowercase mobile-style fragments.
-    must_preserve:
-      - function_name
-      - all_required_arguments
-      - argument_values
-      - tool_schema
-    allowed_noise:
-      - lowercase text
-      - dropped punctuation
-      - dropped filler words
-      - compact slot-first phrasing
-    rejection_rules:
-      - removes an argument value
-      - removes the action or object needed to infer the tool
-      - changes a unit, quantity, entity, or date
-
-  impatient_tone:
-    status: planned
-    description: Add benign frustration, impatience, or profanity around a valid request.
+    description: Add profanity or frustrated tone around the same request.
     must_preserve:
       - function_name
       - all_required_arguments
@@ -45,46 +26,59 @@ dimensions:
       - tool_schema
     allowed_noise:
       - profanity
+      - frustration
       - impatient phrasing
-      - casual address terms
-      - urgency-like tone without new deadlines
     rejection_rules:
-      - introduces a new task constraint
       - changes the requested action
+      - introduces a new deadline or preference
       - makes refusal or safety behavior the intended target
 
-  messy_punctuation_casing:
+  irrelevant_context:
     status: planned
-    description: Add realistic casing and punctuation messiness around a valid request.
+    description: Add unrelated personal or situational context around the request.
     must_preserve:
       - function_name
       - all_required_arguments
       - argument_values
       - tool_schema
     allowed_noise:
-      - lowercase or uppercase casing
-      - repeated punctuation
-      - trailing ellipses
-      - casual suffixes like pls
+      - unrelated daily context
+      - short complaints
+      - background text that does not constrain the tool call
     rejection_rules:
-      - changes any value, unit, quantity, entity, or date
-      - removes the action or object needed to infer the tool
-      - adds a new constraint not present in the clean prompt
+      - adds a new task
+      - changes any argument value
+      - makes multiple tool calls plausible when the clean oracle has one
 
-  casual_social_filler:
+  removed_spaces:
     status: planned
-    description: Wrap valid requests in casual address terms or short filler.
+    description: Remove one space inside the request, as in casual or mobile typing.
     must_preserve:
       - function_name
       - all_required_arguments
       - argument_values
       - tool_schema
     allowed_noise:
-      - address terms like hey, yo, bro, brother
-      - polite filler
-      - short casual lead-ins
-      - abbreviations like pls or u
+      - one missing space between ordinary words
+      - compacted phrase that remains understandable
     rejection_rules:
+      - changes or merges numeric values
+      - changes entity names, paths, dates, or quoted strings
+      - makes the requested action ambiguous
+
+  argumentative_challenge:
+    status: planned
+    description: Add a distrustful or argumentative wrapper before the same request.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - distrustful framing
+      - argumentative lead-in
+      - challenge-like phrasing
+    rejection_rules:
+      - asks the model to debate instead of route the tool call
       - changes the requested action
-      - introduces a deadline, preference, or extra condition
-      - makes the request ambiguous when the clean prompt is not
+      - adds a new constraint or alternate answer target

@@ -51,11 +51,11 @@ BFCL_CATEGORY_FILES = {
     ),
 }
 DIMENSION_FILES = {
-    "conversational_overhang": "conversational_overhang.jsonl",
-    "casual_mobile_shorthand": "casual_mobile_shorthand.jsonl",
-    "impatient_tone": "impatient_tone.jsonl",
-    "messy_punctuation_casing": "messy_punctuation_casing.jsonl",
-    "casual_social_filler": "casual_social_filler.jsonl",
+    "typos": "typos.jsonl",
+    "cursing": "cursing.jsonl",
+    "irrelevant_context": "irrelevant_context.jsonl",
+    "removed_spaces": "removed_spaces.jsonl",
+    "argumentative_challenge": "argumentative_challenge.jsonl",
 }
 
 
@@ -84,41 +84,48 @@ STAGES: tuple[Stage, ...] = (
         next_action="Wire the BFCL evaluator adapter and run the selected models on clean prompts.",
     ),
     Stage(
-        name="augment-overhang",
-        purpose="Generate realistic irrelevant conversational context around clean requests.",
+        name="augment-typos",
+        purpose="Generate requests with realistic small typos.",
         inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/conversational_overhang.jsonl",),
+        outputs=("artifacts/generated/typos.jsonl",),
+        next_action="Review typo realism, then run paired evaluation on accepted examples.",
+    ),
+    Stage(
+        name="augment-cursing",
+        purpose="Generate requests with profanity or frustrated tone.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/cursing.jsonl",),
+        next_action="Review cursing realism, then run paired evaluation on accepted examples.",
+    ),
+    Stage(
+        name="augment-irrelevant-context",
+        purpose="Generate requests with irrelevant context around the task.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/irrelevant_context.jsonl",),
+        next_action="Review context realism, then run paired evaluation on accepted examples.",
+    ),
+    Stage(
+        name="augment-removed-spaces",
+        purpose="Generate requests with realistic missing spaces inside words or phrases.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/removed_spaces.jsonl",),
+        next_action="Review spacing realism, then run paired evaluation on accepted examples.",
+    ),
+    Stage(
+        name="augment-argumentative",
+        purpose="Generate argumentative or distrustful wrappers around valid requests.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/argumentative_challenge.jsonl",),
         next_action=(
-            "Implement the conversational overhang generator with oracle-preservation metadata."
+            "Review argumentative realism, then run paired evaluation on accepted examples."
         ),
     ),
     Stage(
-        name="augment-mobile-shorthand",
-        purpose="Generate compressed mobile-style requests that preserve the oracle.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/casual_mobile_shorthand.jsonl",),
-        next_action="Run paired evaluation and inspect whether compressed phrasing drops slots.",
-    ),
-    Stage(
-        name="augment-impatient-tone",
-        purpose="Generate benign frustrated requests that preserve the oracle.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/impatient_tone.jsonl",),
-        next_action="Run paired evaluation and inspect whether user tone changes routing.",
-    ),
-    Stage(
-        name="augment-messy-punctuation",
-        purpose="Generate requests with realistic casing and punctuation noise.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/messy_punctuation_casing.jsonl",),
-        next_action="Run paired evaluation and inspect whether surface messiness hurts routing.",
-    ),
-    Stage(
-        name="augment-social-filler",
-        purpose="Generate requests wrapped in casual address terms and filler.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/casual_social_filler.jsonl",),
-        next_action="Run paired evaluation and inspect whether casual filler distracts routing.",
+        name="review-augmentations",
+        purpose="Write a wide CSV with one base row and five augmented prompt columns.",
+        inputs=("artifacts/frozen/clean_subset.jsonl", "artifacts/generated/"),
+        outputs=("artifacts/generated/augmentation_50_review.csv",),
+        next_action="Inspect the CSV and decide which augmentations are realistic enough.",
     ),
     Stage(
         name="verify-noisy",
@@ -579,46 +586,48 @@ def input_fingerprint(example: dict[str, object]) -> str:
     )
 
 
-OVERHANG_TEMPLATES = (
-    "hey quick one - {prompt}",
-    "before i forget, {prompt}",
-    "can you help me with this? {prompt}",
-    "sorry, different topic for a sec: {prompt}",
-    "i'm updating some notes and need this too: {prompt}",
-    "ok while i'm here, {prompt}",
-    "my notes are kind of all over the place. {prompt}",
-    "one more thing: {prompt}",
-    "btw {prompt}",
-    "{prompt} thanks",
-    "{prompt} - trying to finish this before my next meeting",
-    "{prompt} if that makes sense",
-)
-IMPATIENT_TEMPLATES = (
-    "ugh {prompt}",
+Cursing = str
+
+CURSING_TEMPLATES: tuple[Cursing, ...] = (
     "for fuck sake {prompt}",
-    "bro please {prompt}",
-    "can you just {prompt}",
-    "please just {prompt}",
-    "i do not have time for this, {prompt}",
-    "seriously, {prompt}",
-    "come on, {prompt}",
+    "holy shit just {prompt}",
+    "this is annoying, {prompt}",
+    "goddamn it {prompt}",
+    "i'm tired of this, {prompt}",
+    "ffs {prompt}",
 )
-SOCIAL_FILLER_TEMPLATES = (
-    "hey, {prompt}",
-    "yo can you help - {prompt}",
-    "brother please {prompt}",
-    "quick question, {prompt}",
-    "pls {prompt}",
-    "hi, sorry, {prompt}",
-    "need a hand here: {prompt}",
-    "can u do this: {prompt}",
+IRRELEVANT_CONTEXT_TEMPLATES = (
+    "it was horrible today but anyway, {prompt}",
+    "my commute was a mess. unrelated, {prompt}",
+    "i'm in the middle of three things right now; {prompt}",
+    "the meeting earlier was useless, but can you do this: {prompt}",
+    "my laptop is being weird today. {prompt}",
+    "i spilled coffee and lost my notes, so {prompt}",
 )
-MESSY_PUNCTUATION_TEMPLATES = (
-    "{prompt}??",
-    "{prompt} pls",
-    "{prompt} ...",
-    "{prompt}!!",
-    "{prompt}",
+ARGUMENTATIVE_TEMPLATES = (
+    "you are wrong all the time, what do you really think is {prompt}",
+    "last time you messed this up, so answer carefully: {prompt}",
+    "i don't trust your first answer, but {prompt}",
+    "prove you can actually do this: {prompt}",
+    "you keep getting these wrong. {prompt}",
+    "be honest and don't dodge it: {prompt}",
+)
+TYPO_REPLACEMENTS = (
+    ("calculate", "calcuate"),
+    ("factorial", "factroial"),
+    ("triangle", "traingle"),
+    ("height", "heigth"),
+    ("circle", "circel"),
+    ("radius", "raduis"),
+    ("equation", "eqaution"),
+    ("coefficients", "coeficients"),
+    ("function", "funciton"),
+    ("temperature", "temprature"),
+    ("weather", "weahter"),
+    ("distance", "distnace"),
+    ("between", "betwen"),
+    ("lengths", "lenghts"),
+    ("hypotenuse", "hypotnuse"),
 )
 
 
@@ -629,48 +638,49 @@ def lowercase_first_alpha(text: str) -> str:
     return text
 
 
-def overhang_prompt(clean_prompt: str, index: int) -> str:
-    template = OVERHANG_TEMPLATES[index % len(OVERHANG_TEMPLATES)]
+def cursing_prompt(clean_prompt: str, index: int) -> str:
+    template = CURSING_TEMPLATES[index % len(CURSING_TEMPLATES)]
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
 
 
-def impatient_prompt(clean_prompt: str, index: int) -> str:
-    template = IMPATIENT_TEMPLATES[index % len(IMPATIENT_TEMPLATES)]
+def irrelevant_context_prompt(clean_prompt: str, index: int) -> str:
+    template = IRRELEVANT_CONTEXT_TEMPLATES[index % len(IRRELEVANT_CONTEXT_TEMPLATES)]
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
 
 
-def social_filler_prompt(clean_prompt: str, index: int) -> str:
-    template = SOCIAL_FILLER_TEMPLATES[index % len(SOCIAL_FILLER_TEMPLATES)]
+def argumentative_prompt(clean_prompt: str, index: int) -> str:
+    template = ARGUMENTATIVE_TEMPLATES[index % len(ARGUMENTATIVE_TEMPLATES)]
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
 
 
-def messy_punctuation_prompt(clean_prompt: str, index: int) -> str:
-    text = clean_prompt.strip()
-    if index % 3 == 0:
-        text = text.lower()
-    elif index % 3 == 1:
-        text = text.upper()
-    template = MESSY_PUNCTUATION_TEMPLATES[index % len(MESSY_PUNCTUATION_TEMPLATES)]
-    return template.format(prompt=text)
+def typo_prompt(clean_prompt: str, index: int) -> str:
+    text = clean_prompt
+    start = index % len(TYPO_REPLACEMENTS)
+    for offset in range(len(TYPO_REPLACEMENTS)):
+        source, replacement = TYPO_REPLACEMENTS[(start + offset) % len(TYPO_REPLACEMENTS)]
+        updated = re.sub(rf"\b{source}\b", replacement, text, count=1, flags=re.IGNORECASE)
+        if updated != text:
+            return updated
+    words = text.split()
+    for word_index, word in enumerate(words):
+        if len(word.strip(".,?!")) > 5:
+            stripped = word.strip(".,?!")
+            typo = stripped[:2] + stripped[3] + stripped[2] + stripped[4:]
+            words[word_index] = word.replace(stripped, typo)
+            return " ".join(words)
+    return text
 
 
-def mobile_shorthand_prompt(clean_prompt: str, _index: int) -> str:
-    text = clean_prompt.lower()
-    triangle_area = re.search(
-        r"area of a triangle.*?base(?: of)? (?P<base>-?\d+(?:\.\d+)?).*?"
-        r"height(?: of)? (?P<height>-?\d+(?:\.\d+)?)",
-        text,
+def removed_spaces_prompt(clean_prompt: str, index: int) -> str:
+    pairs = list(re.finditer(r"\b[A-Za-z]{2,}\s+[A-Za-z]{2,}\b", clean_prompt))
+    if not pairs:
+        return clean_prompt
+    match = pairs[index % len(pairs)]
+    return (
+        clean_prompt[: match.start()]
+        + match.group(0).replace(" ", "", 1)
+        + clean_prompt[match.end() :]
     )
-    if triangle_area:
-        return (
-            f"area triangle {triangle_area.group('base')} base "
-            f"height {triangle_area.group('height')}"
-        )
-
-    text = text.strip()
-    text = re.sub(r"[?!]+$", "", text)
-    text = re.sub(r"(?<!\d)\.$", "", text)
-    return " ".join(text.split())
 
 
 def transform_messages(question: object, index: int, transform: object) -> object:
@@ -715,24 +725,91 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
     print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
 
 
-def augment_overhang() -> None:
-    augment_dimension("conversational_overhang", "overhang", overhang_prompt)
+def augment_typos() -> None:
+    augment_dimension("typos", "typos", typo_prompt)
 
 
-def augment_mobile_shorthand() -> None:
-    augment_dimension("casual_mobile_shorthand", "mobile", mobile_shorthand_prompt)
+def augment_cursing() -> None:
+    augment_dimension("cursing", "cursing", cursing_prompt)
 
 
-def augment_impatient_tone() -> None:
-    augment_dimension("impatient_tone", "impatient", impatient_prompt)
+def augment_irrelevant_context() -> None:
+    augment_dimension("irrelevant_context", "context", irrelevant_context_prompt)
 
 
-def augment_messy_punctuation() -> None:
-    augment_dimension("messy_punctuation_casing", "messy", messy_punctuation_prompt)
+def augment_removed_spaces() -> None:
+    augment_dimension("removed_spaces", "spaces", removed_spaces_prompt)
 
 
-def augment_social_filler() -> None:
-    augment_dimension("casual_social_filler", "social", social_filler_prompt)
+def augment_argumentative() -> None:
+    augment_dimension("argumentative_challenge", "argue", argumentative_prompt)
+
+
+def prompt_text(example: dict[str, object]) -> str:
+    return conversation_text(example["question"])
+
+
+def review_augmentations() -> None:
+    clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    output_path = REPO_ROOT / "artifacts/generated/augmentation_50_review.csv"
+
+    if not clean_path.exists():
+        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
+
+    dimensions = (
+        ("typos", "aug_typo"),
+        ("cursing", "aug_cursing"),
+        ("irrelevant_context", "aug_irrelevant_context"),
+        ("removed_spaces", "aug_removed_spaces"),
+        ("argumentative_challenge", "aug_argumentative"),
+    )
+    generated_by_dimension = {}
+    for dimension, _column in dimensions:
+        path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
+        if not path.exists():
+            raise SystemExit(f"Missing {path.relative_to(REPO_ROOT)}. Run augment stages first.")
+        generated_by_dimension[dimension] = {
+            row["base_id"]: row for row in read_jsonl(path)
+        }
+
+    examples = read_jsonl(clean_path)
+    limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
+    if limit is not None:
+        examples = examples[:limit]
+        print(f"Limiting review CSV to first {len(examples)} examples")
+
+    fieldnames = [
+        "base_id",
+        "category",
+        "clean_prompt",
+        "aug_typo",
+        "aug_cursing",
+        "aug_irrelevant_context",
+        "aug_removed_spaces",
+        "aug_argumentative",
+        "function_names",
+        "ground_truth",
+    ]
+    rows = []
+    for example in examples:
+        row = {
+            "base_id": example["id"],
+            "category": example["category"],
+            "clean_prompt": prompt_text(example),
+            "function_names": ", ".join(function["name"] for function in example["function"]),
+            "ground_truth": json.dumps(example["ground_truth"], ensure_ascii=False),
+        }
+        for dimension, column in dimensions:
+            augmented = generated_by_dimension[dimension][example["id"]]
+            row[column] = prompt_text(augmented)
+        rows.append(row)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
 
 
 def accuracy_metrics(predictions: list[dict[str, object]]) -> dict[str, object]:
@@ -1399,20 +1476,23 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
     if stage.name == "clean-baseline":
         clean_baseline()
         return
-    if stage.name == "augment-overhang":
-        augment_overhang()
+    if stage.name == "augment-typos":
+        augment_typos()
         return
-    if stage.name == "augment-mobile-shorthand":
-        augment_mobile_shorthand()
+    if stage.name == "augment-cursing":
+        augment_cursing()
         return
-    if stage.name == "augment-impatient-tone":
-        augment_impatient_tone()
+    if stage.name == "augment-irrelevant-context":
+        augment_irrelevant_context()
         return
-    if stage.name == "augment-messy-punctuation":
-        augment_messy_punctuation()
+    if stage.name == "augment-removed-spaces":
+        augment_removed_spaces()
         return
-    if stage.name == "augment-social-filler":
-        augment_social_filler()
+    if stage.name == "augment-argumentative":
+        augment_argumentative()
+        return
+    if stage.name == "review-augmentations":
+        review_augmentations()
         return
     if stage.name == "paired-eval":
         paired_eval()

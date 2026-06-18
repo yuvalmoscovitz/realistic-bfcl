@@ -20,11 +20,11 @@ evaluation:
 
 generation:
   accepted_dimensions:
-    - conversational_overhang
-    - casual_mobile_shorthand
-    - impatient_tone
-    - messy_punctuation_casing
-    - casual_social_filler
+    - typos
+    - cursing
+    - irrelevant_context
+    - removed_spaces
+    - argumentative_challenge
   rejected_by_default:
     - adversarial_word_games
     - random_typos_without_human_plausibility
