@@ -66,7 +66,9 @@ LLM_DIMENSIONS = (
 )
 
 SENSITIVE_SLOT_TERMS = {
+    "accepts_insurance": ("insurance", "insured", "self-pay", "self pay"),
     "accessibility": ("accessibility", "accessible", "wheelchair", "mobility"),
+    "include_disabled": ("disabled", "enabled", "active", "inactive"),
     "include_hidden": ("hidden", "dotfile", "dot file", "dotfiles"),
     "include_images": ("image", "images", "photo", "photos", "picture", "pictures"),
     "language": ("language", "english", "spanish", "french", "german", "hebrew"),
