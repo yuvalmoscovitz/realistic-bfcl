@@ -31,60 +31,72 @@ the final oracle must be well-defined and derived from the clean oracle.
 ```text
 configs/
   project.yaml                 Reproducibility pins and current assumptions.
-  realism_dimensions.yaml      Initial augmentation dimensions and limits.
-  subsets/smoke.yaml           First clean subset definition.
+  realism_dimensions.yaml      Current realism dimensions and limits.
+  subsets/smoke.yaml           Current stratified clean subset definition.
 docs/
-  research_pipeline.md         Staged execution plan.
+  research_pipeline.md         Research workflow and artifact contract.
   realism_contract.md          Validity rules and rejection criteria.
   evaluation_metrics.md        Paired metrics and error taxonomy.
 src/realistic_bfcl/
-  pipeline.py                  Stage registry used by scripts and Makefile.
+  pipeline.py                  Dataset construction, evaluation, and analysis code.
   contracts.py                 Lightweight data contracts for examples.
 scripts/
-  run_stage.py                 Single entry point for staged execution.
-Makefile                       Human-facing stage commands.
+  run_stage.py                 Single entry point for research steps.
+Makefile                       Human-facing research commands.
 ```
 
-## Current Stage Commands
+## Research Commands
 
-The stage commands are intentionally lightweight placeholders. They make the
-pipeline executable and fail clearly until the corresponding research artifact
-is implemented.
+The repository has three core functions plus one reproducibility setup step:
 
 ```bash
 make status
 make lint
-make freeze-bfcl
-make clean-baseline
-make augment-typos
-make augment-cursing
-make augment-irrelevant-context
-make augment-removed-spaces
-make augment-argumentative
-make review-augmentations
-make verify-noisy
-make paired-eval
+make prepare-subset
+make augment
+make run-bfcl
 make analyze
-make defenses
 ```
 
-To inspect all registered stages:
+`prepare-subset` freezes the BFCL substrate and materializes the configured
+clean subset.
+
+`augment` creates the frozen noisy dataset once. It currently writes five
+oracle-preserving dimensions:
+
+- `typos`
+- `cursing`
+- `irrelevant_context`
+- `removed_spaces`
+- `argumentative_challenge`
+
+It also writes `artifacts/generated/augmentation_review.csv` for human
+inspection. Deterministic invariant checks reject examples that alter numbers,
+quoted strings, or visible gold argument values.
+
+`run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
+AST checker, cache, and parallel OpenAI calls.
+
+`analyze` writes paired degradation metrics and review files under
+`artifacts/analysis/`, including raw and adjusted degradation.
+
+To inspect all registered steps:
 
 ```bash
 python scripts/run_stage.py --list
 ```
 
-To dry-run a stage and see its expected inputs and outputs:
+To dry-run a step and see its expected inputs and outputs:
 
 ```bash
-python scripts/run_stage.py clean-baseline --dry-run
+python scripts/run_stage.py run-bfcl --dry-run
 ```
 
-`freeze-bfcl` expects access to a checkout of the pinned BFCL upstream repository.
+`prepare-subset` expects access to a checkout of the pinned BFCL upstream repository.
 Set `REALISTIC_BFCL_BFCL_ROOT=/path/to/gorilla` when the checkout is not in the
 default local inspection path.
 
-`clean-baseline` runs `oracle_replay` and `gpt-5.4-nano`. Provide the OpenAI key
+`run-bfcl` runs `oracle_replay` and `gpt-5.4-nano`. Provide the OpenAI key
 through `OPENAI_API_KEY`, `REALISTIC_BFCL_ENV_FILE=/path/to/.env`, or a sibling
 `../underlayer/.env` file. Missing model predictions run in parallel with
 `REALISTIC_BFCL_CONCURRENCY`, which defaults to `8`.
@@ -101,6 +113,7 @@ through `OPENAI_API_KEY`, `REALISTIC_BFCL_ENV_FILE=/path/to/.env`, or a sibling
    - argumentative challenge
 4. Add automatic invariant checks for oracle preservation.
 5. Run paired clean-vs-noisy evaluation and report degradation.
+6. Scale from the 400-example pilot to a 1000-example stratified run.
 
 ## Non-Goals For The First Pass
 

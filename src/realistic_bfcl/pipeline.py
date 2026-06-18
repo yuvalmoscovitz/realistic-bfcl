@@ -70,80 +70,39 @@ class Stage:
 
 STAGES: tuple[Stage, ...] = (
     Stage(
-        name="freeze-bfcl",
-        purpose="Pin BFCL source metadata and local subset configuration.",
+        name="prepare-subset",
+        purpose="Freeze the reproducible BFCL clean subset used as the substrate.",
         inputs=("configs/project.yaml", "configs/subsets/smoke.yaml"),
-        outputs=("artifacts/frozen/bfcl_manifest.json",),
-        next_action="Materialize the configured subset from the pinned BFCL commit.",
-    ),
-    Stage(
-        name="clean-baseline",
-        purpose="Reproduce BFCL-style clean scores before adding noise.",
-        inputs=("artifacts/frozen/bfcl_manifest.json",),
-        outputs=("artifacts/results/clean/",),
-        next_action="Wire the BFCL evaluator adapter and run the selected models on clean prompts.",
-    ),
-    Stage(
-        name="augment-typos",
-        purpose="Generate requests with realistic small typos.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/typos.jsonl",),
-        next_action="Review typo realism, then run paired evaluation on accepted examples.",
-    ),
-    Stage(
-        name="augment-cursing",
-        purpose="Generate requests with profanity or frustrated tone.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/cursing.jsonl",),
-        next_action="Review cursing realism, then run paired evaluation on accepted examples.",
-    ),
-    Stage(
-        name="augment-irrelevant-context",
-        purpose="Generate requests with irrelevant context around the task.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/irrelevant_context.jsonl",),
-        next_action="Review context realism, then run paired evaluation on accepted examples.",
-    ),
-    Stage(
-        name="augment-removed-spaces",
-        purpose="Generate requests with realistic missing spaces inside words or phrases.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/removed_spaces.jsonl",),
-        next_action="Review spacing realism, then run paired evaluation on accepted examples.",
-    ),
-    Stage(
-        name="augment-argumentative",
-        purpose="Generate argumentative or distrustful wrappers around valid requests.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/argumentative_challenge.jsonl",),
-        next_action=(
-            "Review argumentative realism, then run paired evaluation on accepted examples."
+        outputs=(
+            "artifacts/frozen/bfcl_manifest.json",
+            "artifacts/frozen/clean_subset.jsonl",
         ),
+        next_action="Run augment to construct the oracle-preserving noisy dataset.",
     ),
     Stage(
-        name="review-augmentations",
-        purpose="Write a wide CSV with one base row and five augmented prompt columns.",
+        name="augment",
+        purpose="Construct the frozen noisy dataset with oracle-preserving transforms.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=(
+            "artifacts/generated/typos.jsonl",
+            "artifacts/generated/cursing.jsonl",
+            "artifacts/generated/irrelevant_context.jsonl",
+            "artifacts/generated/removed_spaces.jsonl",
+            "artifacts/generated/argumentative_challenge.jsonl",
+            "artifacts/generated/augmentation_review.csv",
+        ),
+        next_action="Run BFCL clean/noisy paired evaluation on the frozen dataset.",
+    ),
+    Stage(
+        name="run-bfcl",
+        purpose="Run clean and noisy BFCL-style evaluation with identical schemas.",
         inputs=("artifacts/frozen/clean_subset.jsonl", "artifacts/generated/"),
-        outputs=("artifacts/generated/augmentation_review.csv",),
-        next_action="Inspect the CSV and decide which augmentations are realistic enough.",
-    ),
-    Stage(
-        name="verify-noisy",
-        purpose="Run invariant checks and realism audit before evaluation.",
-        inputs=("artifacts/generated/",),
-        outputs=("artifacts/audits/noisy_examples_audit.jsonl", "artifacts/accepted/"),
-        next_action=(
-            "Add deterministic schema and oracle checks, then attach human or LLM audit labels."
+        outputs=(
+            "artifacts/results/clean/",
+            "artifacts/results/noisy/",
+            "artifacts/results/paired/",
         ),
-    ),
-    Stage(
-        name="paired-eval",
-        purpose="Evaluate clean and noisy variants with identical models and schemas.",
-        inputs=("artifacts/results/clean/", "artifacts/accepted/"),
-        outputs=("artifacts/results/noisy/", "artifacts/results/paired/"),
-        next_action=(
-            "Run the evaluator for each accepted noisy variant and join results to clean runs."
-        ),
+        next_action="Analyze paired clean-vs-noisy degradation and failure types.",
     ),
     Stage(
         name="analyze",
@@ -157,15 +116,6 @@ STAGES: tuple[Stage, ...] = (
         ),
         next_action=(
             "Use adjusted regression metrics to decide whether the pilot is ready to scale."
-        ),
-    ),
-    Stage(
-        name="defenses",
-        purpose="Ablate simple defenses against realistic conversational noise.",
-        inputs=("artifacts/accepted/", "artifacts/results/paired/"),
-        outputs=("artifacts/analysis/defense_ablations/"),
-        next_action=(
-            "Run denoising, stricter tool-use instructions, schema variants, and decoding variants."
         ),
     ),
 )
@@ -185,7 +135,7 @@ def list_stages() -> None:
 
 
 def describe_stage(stage: Stage) -> None:
-    print(f"Stage: {stage.name}")
+    print(f"Step: {stage.name}")
     print(f"Purpose: {stage.purpose}")
     print("Inputs:")
     for item in stage.inputs:
@@ -849,7 +799,7 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
     output_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
 
     if not subset_path.exists():
-        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
+        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run prepare-subset first.")
 
     rows = []
     examples = read_jsonl(subset_path)
@@ -926,6 +876,15 @@ def augment_argumentative() -> None:
     augment_dimension("argumentative_challenge", "argue", argumentative_prompt)
 
 
+def augment() -> None:
+    augment_typos()
+    augment_cursing()
+    augment_irrelevant_context()
+    augment_removed_spaces()
+    augment_argumentative()
+    review_augmentations()
+
+
 def prompt_text(example: dict[str, object]) -> str:
     return conversation_text(example["question"])
 
@@ -935,7 +894,7 @@ def review_augmentations() -> None:
     output_path = REPO_ROOT / "artifacts/generated/augmentation_review.csv"
 
     if not clean_path.exists():
-        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
+        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run prepare-subset first.")
 
     dimensions = (
         ("typos", "aug_typo"),
@@ -948,7 +907,7 @@ def review_augmentations() -> None:
     for dimension, _column in dimensions:
         path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
         if not path.exists():
-            raise SystemExit(f"Missing {path.relative_to(REPO_ROOT)}. Run augment stages first.")
+            raise SystemExit(f"Missing {path.relative_to(REPO_ROOT)}. Run augment first.")
         generated_by_dimension[dimension] = {
             row["base_id"]: row for row in read_jsonl(path)
         }
@@ -1086,7 +1045,9 @@ def load_current_clean_predictions(
 ) -> dict[str, dict[str, object]]:
     clean_subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     if not clean_subset_path.exists():
-        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
+        raise SystemExit(
+            "Missing artifacts/frozen/clean_subset.jsonl. Run prepare-subset first."
+        )
 
     clean_examples = {
         example["id"]: example
@@ -1118,7 +1079,7 @@ def load_current_clean_predictions(
             details.append(f"{len(stale_predictions)} stale")
         raise SystemExit(
             "Clean model predictions are not current for paired eval "
-            f"({', '.join(details)}). Run clean-baseline first."
+            f"({', '.join(details)}). Run run-bfcl first."
         )
     return {prediction_id: clean_predictions[prediction_id] for prediction_id in base_ids}
 
@@ -1180,7 +1141,7 @@ def freeze_bfcl() -> None:
             "status": "source_pinned_subset_materialized",
             "notes": [
                 "This pins the BFCL upstream commit and materializes the local smoke subset.",
-                "Model API evaluation is still pending; clean-baseline runs oracle replay only.",
+                "Model API evaluation runs in the run-bfcl step.",
             ],
         },
     )
@@ -1195,9 +1156,13 @@ def clean_baseline() -> None:
     model_predictions_path = REPO_ROOT / f"artifacts/results/clean/{OPENAI_MODEL}_predictions.jsonl"
 
     if not manifest_path.exists():
-        raise SystemExit("Missing artifacts/frozen/bfcl_manifest.json. Run freeze-bfcl first.")
+        raise SystemExit(
+            "Missing artifacts/frozen/bfcl_manifest.json. Run prepare-subset first."
+        )
     if not subset_path.exists():
-        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
+        raise SystemExit(
+            "Missing artifacts/frozen/clean_subset.jsonl. Run prepare-subset first."
+        )
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     examples = read_jsonl(subset_path)
@@ -1223,7 +1188,7 @@ def clean_baseline() -> None:
         result_path,
         {
             "created_at": utc_now(),
-            "stage": "clean-baseline",
+            "stage": "run-bfcl",
             "status": "ran_model_baseline",
             "reason": "Ran oracle replay and a real OpenAI model baseline.",
             "bfcl_manifest": "artifacts/frozen/bfcl_manifest.json",
@@ -1304,7 +1269,7 @@ def generated_dimensions() -> list[str]:
     if missing_artifacts:
         raise SystemExit(
             f"Requested dimensions are not generated: {missing_artifacts}. "
-            "Run the corresponding augment stage first."
+            "Run augment first."
         )
     return [dimension for dimension in dimensions if dimension in requested_dimensions]
 
@@ -1326,7 +1291,7 @@ def paired_eval_dimension(dimension: str) -> dict[str, object]:
     )
 
     if not clean_predictions_path.exists():
-        raise SystemExit("Missing clean model predictions. Run clean-baseline first.")
+        raise SystemExit("Missing clean model predictions. Run run-bfcl first.")
 
     noisy_examples = read_jsonl(noisy_path)
     clean_predictions = load_current_clean_predictions(
@@ -1361,7 +1326,7 @@ def paired_eval_dimension(dimension: str) -> dict[str, object]:
         summary_path,
         {
             "created_at": utc_now(),
-            "stage": "paired-eval",
+            "stage": "run-bfcl",
             "model": OPENAI_MODEL,
             "dimension": dimension,
             "clean_predictions": clean_predictions_path.relative_to(REPO_ROOT).as_posix(),
@@ -1383,17 +1348,22 @@ def paired_eval_dimension(dimension: str) -> dict[str, object]:
 def paired_eval() -> None:
     dimensions = generated_dimensions()
     if not dimensions:
-        raise SystemExit("No generated noisy dimensions found. Run an augment stage first.")
+        raise SystemExit("No generated noisy dimensions found. Run augment first.")
     summaries = [paired_eval_dimension(dimension) for dimension in dimensions]
     write_json(
         REPO_ROOT / f"artifacts/results/paired/{OPENAI_MODEL}_summary.json",
         {
             "created_at": utc_now(),
-            "stage": "paired-eval",
+            "stage": "run-bfcl",
             "model": OPENAI_MODEL,
             "dimensions": summaries,
         },
     )
+
+
+def run_bfcl() -> None:
+    clean_baseline()
+    paired_eval()
 
 
 def call_names(calls: object) -> list[str]:
@@ -1919,7 +1889,7 @@ def analyze() -> None:
         ).exists()
     ]
     if not dimensions:
-        raise SystemExit("No paired results found. Run paired-eval first.")
+        raise SystemExit("No paired results found. Run run-bfcl first.")
     summaries = [analyze_dimension(dimension) for dimension in dimensions]
     flip_rows = []
     for dimension in dimensions:
@@ -2030,50 +2000,29 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
     describe_stage(stage)
     if dry_run:
         return
-    if stage.name == "freeze-bfcl":
+    if stage.name == "prepare-subset":
         freeze_bfcl()
         return
-    if stage.name == "clean-baseline":
-        clean_baseline()
+    if stage.name == "augment":
+        augment()
         return
-    if stage.name == "augment-typos":
-        augment_typos()
-        return
-    if stage.name == "augment-cursing":
-        augment_cursing()
-        return
-    if stage.name == "augment-irrelevant-context":
-        augment_irrelevant_context()
-        return
-    if stage.name == "augment-removed-spaces":
-        augment_removed_spaces()
-        return
-    if stage.name == "augment-argumentative":
-        augment_argumentative()
-        return
-    if stage.name == "review-augmentations":
-        review_augmentations()
-        return
-    if stage.name == "paired-eval":
-        paired_eval()
+    if stage.name == "run-bfcl":
+        run_bfcl()
         return
     if stage.name == "analyze":
         analyze()
         return
-    raise SystemExit(
-        "Stage implementation pending. Use --dry-run for planning, then replace "
-        "this placeholder once the corresponding artifact is implemented."
-    )
+    raise SystemExit(f"Stage implementation missing: {stage.name}")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Realistic-BFCL research stages.")
-    parser.add_argument("stage", nargs="?", help="Stage name to inspect or run.")
-    parser.add_argument("--list", action="store_true", help="List available stages.")
+    parser = argparse.ArgumentParser(description="Run Realistic-BFCL research steps.")
+    parser.add_argument("stage", nargs="?", help="Step name to inspect or run.")
+    parser.add_argument("--list", action="store_true", help="List available steps.")
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Describe the stage without running it.",
+        help="Describe the step without running it.",
     )
     return parser
 
@@ -2086,7 +2035,7 @@ def main(argv: list[str] | None = None) -> None:
         list_stages()
         return
     if not args.stage:
-        parser.error("provide a stage name or --list")
+        parser.error("provide a step name or --list")
 
     run_stage(stage_by_name(args.stage), dry_run=args.dry_run)
 
