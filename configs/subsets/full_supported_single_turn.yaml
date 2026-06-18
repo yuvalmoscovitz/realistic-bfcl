@@ -1,0 +1,19 @@
+subset:
+  name: full_supported_single_turn
+  purpose: Full currently supported single-turn/live BFCL pool for the main Realistic-BFCL run.
+  bfcl_categories:
+    - simple_python
+    - multiple
+    - parallel
+    - parallel_multiple
+    - live_simple
+    - live_multiple
+    - live_parallel
+    - live_parallel_multiple
+  max_examples: 3000
+  examples_per_category: 2000
+  selection:
+    deterministic: true
+    seed: 20260618
+    include_only_examples_with_stable_gold_oracles: true
+    note: Covers all currently supported single-turn/live categories; excludes memory, multi-turn, web-search, Java, JavaScript, relevance, irrelevance, and format-sensitivity tracks.
