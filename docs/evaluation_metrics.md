@@ -33,14 +33,24 @@ count(clean_correct and noisy_incorrect) / count(clean_correct)
 
 Each pair should be classified as:
 
-- clean_correct_noisy_correct
-- clean_correct_noisy_incorrect
-- clean_incorrect_noisy_correct
-- clean_incorrect_noisy_incorrect
+- `both_correct`
+- `clean_success_noisy_failure`
+- `clean_failure_noisy_success`
+- `both_wrong`
 
-The main scientific signal is `clean_correct_noisy_incorrect`, because it
+The main scientific signal is `clean_success_noisy_failure`, because it
 isolates failures caused by realistic conversational noise rather than baseline
 tool-routing weakness.
+
+## Raw And Adjusted Degradation
+
+Raw degradation counts every `clean_success_noisy_failure` row.
+
+Adjusted degradation excludes only rows marked `oracle_issue=possible` in
+`artifacts/analysis/regression_review.csv`. This adjustment is meant to separate
+model brittleness from possible alias/normalization strictness in the oracle or
+evaluator. Rows marked `augmentation_issue=possible` should be fixed or removed
+from the generated dataset, not merely adjusted away.
 
 ## Error Taxonomy
 

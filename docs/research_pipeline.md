@@ -1,140 +1,95 @@
 # Research Pipeline
 
-This repository is organized around a staged research pipeline. Each stage has
-an explicit purpose, expected inputs, and expected outputs. Later engineering
-can replace the placeholders without changing the benchmark contract.
+Realistic-BFCL is a research benchmark layer, not a product pipeline. The
+repository should make the experimental artifact easy to reproduce:
 
-## Stage 1: Freeze BFCL
+```text
+BFCL clean subset -> frozen augmented dataset -> paired BFCL evaluation -> analysis
+```
 
-Purpose: make the clean substrate reproducible.
+## 1. Prepare The BFCL Substrate
 
-Inputs:
-- BFCL upstream dataset and evaluator.
-- Chosen clean subset definition.
+Command:
 
-Outputs:
-- Pinned dataset commit.
-- Pinned evaluator version.
-- Pinned model list.
-- Frozen clean subset manifest.
+```bash
+python scripts/run_stage.py prepare-subset
+```
 
-Exit criteria:
-- Another researcher can reconstruct the same clean examples and tool schemas.
+Purpose:
+- Pin the BFCL upstream commit.
+- Materialize the configured stratified clean subset.
+- Save enough metadata for another researcher to reconstruct the same examples.
 
-## Stage 2: Clean Baseline
+Primary outputs:
+- `artifacts/frozen/bfcl_manifest.json`
+- `artifacts/frozen/clean_subset.jsonl`
 
-Purpose: verify that this repository reproduces BFCL-style clean scores before
-adding any noise.
+## 2. Construct The Augmented Dataset
 
-Inputs:
-- Frozen BFCL subset.
-- BFCL evaluator adapter.
-- Model list.
+Command:
 
-Outputs:
-- Clean per-example predictions.
-- Clean aggregate accuracy.
-- Setup notes for any deviation from expected BFCL behavior.
+```bash
+python scripts/run_stage.py augment
+```
 
-Exit criteria:
-- Clean scores are understood well enough that later failures can be attributed
-  to realistic transformations rather than evaluator wiring.
+Purpose:
+- Generate the noisy benchmark dataset once for a given subset.
+- Preserve the BFCL gold tool-call oracle.
+- Reject rows that mutate oracle-bearing prompt content.
 
-## Stage 3: Realism Contract
+Current dimensions:
+- `typos`
+- `cursing`
+- `irrelevant_context`
+- `removed_spaces`
+- `argumentative_challenge`
 
-Purpose: define what makes a noisy example valid.
+Primary outputs:
+- `artifacts/generated/*.jsonl`
+- `artifacts/generated/augmentation_review.csv`
 
-Rules:
-- Preserve the BFCL gold function name and arguments.
-- Do not add accidental constraints.
-- Do not remove required constraints.
-- Keep prompts human-plausible and production-like.
-- Reject random adversarial perturbations.
-- For correction or self-repair, derive a final oracle from the clean oracle.
+The JSONL files are evaluator-ready. The CSV is for human inspection only.
 
-Outputs:
-- Rejection criteria.
-- Audit checklist.
-- Automatic invariant checks where possible.
+## 3. Run BFCL-Style Evaluation
 
-## Stage 4: Augmentation Engine
+Command:
 
-Purpose: generate a small number of high-realism variants before scaling.
+```bash
+python scripts/run_stage.py run-bfcl
+```
 
-Initial dimensions:
-- Conversational overhang.
-- Incremental slot revelation.
+Purpose:
+- Run the clean model baseline.
+- Run the same model on every noisy variant.
+- Score clean and noisy predictions with the same BFCL-style AST checker.
+- Cache predictions and run missing OpenAI calls in parallel.
 
-Outputs:
-- Candidate noisy examples.
-- Transformation metadata.
-- Links back to the base BFCL example.
+Primary outputs:
+- `artifacts/results/clean/`
+- `artifacts/results/noisy/`
+- `artifacts/results/paired/`
 
-Exit criteria:
-- Each candidate has an explicit transformation dimension and oracle-preserving
-  rationale.
+## 4. Analyze Paired Degradation
 
-## Stage 5: Verification
+Command:
 
-Purpose: prevent invalid noisy examples from entering evaluation.
+```bash
+python scripts/run_stage.py analyze
+```
 
-Checks:
-- Tool schema unchanged.
-- Function name unchanged unless a repair rule applies.
-- Required arguments unchanged unless a repair rule applies.
-- No new constraints are introduced.
-- No required constraints are removed.
-- Prompt remains plausible for a real user.
+Purpose:
+- Compare clean and noisy outcomes for the same base example.
+- Separate raw degradation from possible oracle/evaluator strictness issues.
+- Produce review files for manual audit and paper tables.
 
-Outputs:
-- Accepted noisy examples.
-- Rejected examples with reasons.
-- Audit log.
+Primary outputs:
+- `artifacts/analysis/benchmark_summary.csv`
+- `artifacts/analysis/benchmark_summary.json`
+- `artifacts/analysis/flip_review.csv`
+- `artifacts/analysis/regression_review.csv`
 
-## Stage 6: Paired Evaluation
+## Scaling Rule
 
-Purpose: compare clean and noisy performance under identical schemas and models.
-
-Outputs:
-- Clean predictions.
-- Noisy predictions.
-- Per-example paired outcomes.
-- Conditional failures where clean succeeds and noisy fails.
-
-## Stage 7: Analysis
-
-Metrics:
-- Clean accuracy.
-- Noisy accuracy.
-- Degradation ratio.
-- Conditional failure rate given clean success.
-
-Error taxonomy:
-- Routing error.
-- Argument drop.
-- Argument hallucination.
-- Malformed call.
-- False refusal.
-- Unnecessary clarification question.
-
-## Stage 8: Defense Ablations
-
-Candidate defenses:
-- Denoising prompt layer.
-- Stricter tool-use instruction.
-- Schema formatting variants.
-- Structured decoding where available.
-
-Outputs:
-- Defense-specific paired scores.
-- Residual failure taxonomy.
-
-## Stage 9: Paper And Release
-
-Release artifacts:
-- Dataset generation code.
-- Accepted noisy examples.
-- Evaluator adapter.
-- Metrics scripts.
-- Analysis scripts.
-- Documentation sufficient for reproduction.
+The 400-example stratified run is the first pilot. After checking the adjusted
+degradation and regression taxonomy, scale to 1000 examples with the same model
+and dimensions before adding new models or new augmentation types.
