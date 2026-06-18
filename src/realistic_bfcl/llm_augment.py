@@ -31,6 +31,7 @@ class LlmDimension:
     name: str
     suffix: str
     instruction: str
+    require_final_clean_prompt: bool = False
 
 
 LLM_DIMENSIONS = (
@@ -62,6 +63,20 @@ LLM_DIMENSIONS = (
             "discarded side tasks. The last user message must clearly ask for exactly the "
             "original request and must determine the tool call."
         ),
+    ),
+    LlmDimension(
+        name="llm_messy_pre_intent_history",
+        suffix="llm_pre_intent",
+        instruction=(
+            "Create a short multi-turn chat before the final user turn. Earlier turns "
+            "should be semi-relevant pre-intent chatter in the same broad domain, where "
+            "the user is unsure, changes their mind, mentions abandoned options, or "
+            "asks vague background questions. The earlier turns must not reveal required "
+            "slots for the final request and must not add constraints that carry into the "
+            "final request. The final user turn must contain the clean prompt verbatim "
+            "as a separate, clear request."
+        ),
+        require_final_clean_prompt=True,
     ),
 )
 
@@ -139,6 +154,18 @@ def schema_property_names(example: dict[str, object]) -> set[str]:
     return names
 
 
+def final_clean_user_message(example: dict[str, object]) -> str:
+    question = example.get("question", [])
+    conversations = question if isinstance(question, list) else []
+    messages = conversations[0] if conversations and isinstance(conversations[0], list) else []
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            content = str(message.get("content", "")).strip()
+            if content:
+                return content
+    return conversation_text(question)
+
+
 def forbidden_active_slot_terms(
     example: dict[str, object],
     clean_prompt: str,
@@ -158,6 +185,7 @@ def forbidden_active_slot_terms(
 def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> str:
     function_names = [function["name"] for function in example["function"]]
     clean_prompt = conversation_text(example["question"])
+    final_user_message = final_clean_user_message(example)
     forbidden_terms = forbidden_active_slot_terms(example, clean_prompt)
     return json.dumps(
         {
@@ -165,6 +193,8 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
             "dimension": dimension.name,
             "dimension_instruction": dimension.instruction,
             "clean_prompt": clean_prompt,
+            "final_clean_user_message": final_user_message,
+            "final_message_verbatim_required": dimension.require_final_clean_prompt,
             "gold_tool_calls": example["ground_truth"],
             "available_function_names": function_names,
             "forbidden_active_slot_terms": forbidden_terms,
@@ -181,6 +211,8 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "format, and tool-use wording when they appear in the clean prompt.",
                 "Do not disambiguate ambiguous entities, names, or locations unless the "
                 "clean prompt already disambiguates them.",
+                "When final_message_verbatim_required is true, the final user message "
+                "must contain final_clean_user_message exactly as written.",
                 "For multi-turn output, the final user message must be the actionable request.",
                 "Keep the text realistic, not adversarial puzzle text.",
                 "Do not mention BFCL, benchmark, oracle, gold, original request, "
@@ -236,8 +268,10 @@ def call_llm_augmenter(example: dict[str, object], dimension: LlmDimension) -> d
 def validate_llm_messages(
     example: dict[str, object],
     messages: list[dict[str, str]],
+    dimension: LlmDimension,
 ) -> list[str]:
     clean_prompt = conversation_text(example["question"])
+    final_user_message = final_clean_user_message(example)
     augmented_text = "\n".join(message["content"] for message in messages)
     lowered_text = augmented_text.lower()
     lowered_clean = clean_prompt.lower()
@@ -274,6 +308,11 @@ def validate_llm_messages(
         reasons.append("augmentation returned no messages")
     elif messages[-1]["role"] != "user":
         reasons.append("final message is not a user turn")
+    elif (
+        dimension.require_final_clean_prompt
+        and final_user_message not in messages[-1]["content"]
+    ):
+        reasons.append("final user message must contain final clean user message verbatim")
 
     meta_terms = (
         "bfcl",
@@ -331,7 +370,7 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
             except RuntimeError as error:
                 last_errors = [str(error)]
                 continue
-            validation_errors = validate_llm_messages(example, messages)
+            validation_errors = validate_llm_messages(example, messages, dimension)
             if not validation_errors:
                 return {
                     "index": index,

@@ -87,6 +87,15 @@ It also writes `artifacts/generated/augmentation_review.csv` for human
 inspection. Deterministic invariant checks reject examples that alter numbers,
 quoted strings, or visible gold argument values.
 
+`augment-llm-pilot` creates saved LLM-generated augmentation candidates for
+human review. It currently supports:
+
+- `llm_work_context`: one workplace-style message with irrelevant context.
+- `llm_prior_thread`: pasted stale ticket/thread plus the current request.
+- `llm_conversation_history`: short history with stale or discarded context.
+- `llm_messy_pre_intent_history`: semi-relevant pre-intent chat where the final
+  user turn contains the clean request verbatim.
+
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
 AST checker, cache, and parallel OpenAI calls.
 

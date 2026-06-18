@@ -58,6 +58,22 @@ Primary outputs:
 
 The JSONL files are evaluator-ready. The CSV is for human inspection only.
 
+LLM-generated pilot dimensions are generated separately:
+
+```bash
+python scripts/run_stage.py augment-llm-pilot
+```
+
+Current LLM dimensions:
+- `llm_work_context`
+- `llm_prior_thread`
+- `llm_conversation_history`
+- `llm_messy_pre_intent_history`
+
+`llm_messy_pre_intent_history` models semi-relevant chat before the user has a
+specific intent. The final user turn must contain the clean BFCL request
+verbatim, so the prior turns can be distracting without becoming the oracle.
+
 ## 3. Run BFCL-Style Evaluation
 
 Command:

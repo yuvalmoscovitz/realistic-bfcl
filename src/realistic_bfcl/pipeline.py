@@ -51,9 +51,11 @@ STAGES: tuple[Stage, ...] = (
             "artifacts/generated/llm_work_context.jsonl",
             "artifacts/generated/llm_prior_thread.jsonl",
             "artifacts/generated/llm_conversation_history.jsonl",
+            "artifacts/generated/llm_messy_pre_intent_history.jsonl",
             "artifacts/generated/llm_work_context_review.csv",
             "artifacts/generated/llm_prior_thread_review.csv",
             "artifacts/generated/llm_conversation_history_review.csv",
+            "artifacts/generated/llm_messy_pre_intent_history_review.csv",
         ),
         next_action=(
             "Review accepted rows, then run paired evaluation for the LLM pilot dimensions."
