@@ -67,6 +67,8 @@ DIMENSION_FILES = {
     "llm_prior_thread": "llm_prior_thread.jsonl",
     "llm_conversation_history": "llm_conversation_history.jsonl",
     "llm_messy_pre_intent_history": "llm_messy_pre_intent_history.jsonl",
+    "llm_profane_frustration": "llm_profane_frustration.jsonl",
+    "llm_argumentative_challenge": "llm_argumentative_challenge.jsonl",
 }
 
 

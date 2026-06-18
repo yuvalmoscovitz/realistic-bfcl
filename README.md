@@ -99,6 +99,10 @@ human review. It currently supports:
   personal context, mild frustration, prior assistant guesses, and overlapping
   details are allowed as long as they do not add active constraints that conflict
   with the final request.
+- `llm_profane_frustration`: one user message with realistic frustration or
+  profanity around the exact clean request.
+- `llm_argumentative_challenge`: one user message with skeptical or challenging
+  tone around the exact clean request.
 
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
 AST checker, cache, and parallel OpenAI calls.

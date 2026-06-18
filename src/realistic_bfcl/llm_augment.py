@@ -85,6 +85,34 @@ LLM_DIMENSIONS = (
         require_final_clean_prompt=True,
         append_final_clean_prompt=True,
     ),
+    LlmDimension(
+        name="llm_profane_frustration",
+        suffix="llm_profane",
+        instruction=(
+            "Create one realistic user message where the user is casually frustrated "
+            "and uses everyday profanity, but still makes the same request. The message "
+            "must include at least one natural profanity such as fuck, fucking, shit, "
+            "bullshit, goddamn, or ffs. The message must contain "
+            "final_clean_user_message exactly as written as the actionable request. Add "
+            "only tone around it: profanity, irritation, filler, or mild complaining. Do "
+            "not paraphrase, shorten, translate, or modify the embedded request. Do not "
+            "add any new active constraints."
+        ),
+        require_final_clean_prompt=True,
+    ),
+    LlmDimension(
+        name="llm_argumentative_challenge",
+        suffix="llm_argue",
+        instruction=(
+            "Create one realistic user message where the user challenges the assistant, "
+            "sounds skeptical, or says it got things wrong before. The message must contain "
+            "final_clean_user_message exactly as written as the actionable request. Add "
+            "only argumentative tone around it, such as doubt, impatience, or pressure to "
+            "be correct. Do not paraphrase, shorten, translate, or modify the embedded "
+            "request. Do not add any new active constraints."
+        ),
+        require_final_clean_prompt=True,
+    ),
 )
 
 SENSITIVE_SLOT_TERMS = {
@@ -113,6 +141,7 @@ PRESERVED_DIRECTIVE_TERMS = (
     "respond in json",
     "using your tools",
 )
+PROFANITY_TERMS = ("fuck", "fucking", "shit", "bullshit", "goddamn", "ffs")
 
 
 def llm_augment_model() -> str:
@@ -221,6 +250,11 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "clean prompt already disambiguates them.",
                 "When final_message_verbatim_required is true, the final user message "
                 "must contain final_clean_user_message exactly as written.",
+                "For llm_profane_frustration and llm_argumentative_challenge, return "
+                "exactly one user message. Put the final_clean_user_message verbatim "
+                "inside that message and add only realistic tone before or after it.",
+                "For llm_profane_frustration, include at least one natural profanity "
+                "outside the verbatim final_clean_user_message.",
                 "When append_final_clean_prompt is true, do not include the final user "
                 "request in your output messages. Generate only the realistic pre-final "
                 "conversation; the final_clean_user_message will be appended by code.",
@@ -323,6 +357,16 @@ def validate_llm_messages(
                     "augmentation introduced inactive schema slot term "
                     f"{term!r} for property {property_name!r}"
                 )
+
+    if dimension.name in {"llm_profane_frustration", "llm_argumentative_challenge"}:
+        if len(messages) != 1:
+            reasons.append(f"{dimension.name} must return exactly one user message")
+        elif messages[0]["role"] != "user":
+            reasons.append(f"{dimension.name} must return a user message")
+    if dimension.name == "llm_profane_frustration" and not any(
+        term in lowered_text for term in PROFANITY_TERMS
+    ):
+        reasons.append("llm_profane_frustration must include profanity")
 
     if not messages:
         reasons.append("augmentation returned no messages")
