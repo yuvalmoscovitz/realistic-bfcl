@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import re
 
@@ -692,6 +693,39 @@ def strong_failure_examples(regression_rows: list[dict[str, object]]) -> list[di
     ]
 
 
+def paper_review_labels() -> dict[str, dict[str, str]]:
+    path = REPO_ROOT / "configs/paper_failure_review_labels.csv"
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8", newline="") as handle:
+        return {
+            row["noisy_id"]: {
+                "paper_include": row["paper_include"],
+                "human_judgment": row["human_judgment"],
+                "short_explanation": row["short_explanation"],
+            }
+            for row in csv.DictReader(handle)
+        }
+
+
+def paper_failure_review_rows(
+    strong_examples: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    labels = paper_review_labels()
+    rows = []
+    for row in strong_examples:
+        label = labels.get(
+            str(row["noisy_id"]),
+            {
+                "paper_include": "no",
+                "human_judgment": "needs_review",
+                "short_explanation": "Not reviewed yet.",
+            },
+        )
+        rows.append({**label, **row})
+    return rows
+
+
 def benchmark_summary_rows(
     dimensions: list[str],
     regression_rows: list[dict[str, object]],
@@ -782,6 +816,8 @@ def analyze() -> None:
     strong_failure_examples_path = (
         REPO_ROOT / "artifacts/analysis/strong_failure_examples.csv"
     )
+    paper_failure_review_path = REPO_ROOT / "artifacts/analysis/paper_failure_review.csv"
+    paper_failure_examples_path = REPO_ROOT / "artifacts/analysis/paper_failure_examples.csv"
     benchmark_summary_csv_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.csv"
     benchmark_summary_json_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.json"
     write_csv(
@@ -845,6 +881,30 @@ def analyze() -> None:
             "noisy_prediction",
         ],
     )
+    paper_review_rows = paper_failure_review_rows(strong_examples)
+    paper_failure_fieldnames = [
+        "paper_include",
+        "human_judgment",
+        "short_explanation",
+        "rank",
+        "evidence_reason",
+        "base_id",
+        "noisy_id",
+        "category",
+        "dimension",
+        "manual_error_type",
+        "clean_prompt",
+        "noisy_prompt",
+        "gold",
+        "clean_prediction",
+        "noisy_prediction",
+    ]
+    write_csv(paper_failure_review_path, paper_review_rows, paper_failure_fieldnames)
+    write_csv(
+        paper_failure_examples_path,
+        [row for row in paper_review_rows if row["paper_include"] == "yes"],
+        paper_failure_fieldnames,
+    )
     benchmark_rows = benchmark_summary_rows(dimensions, regression_rows)
     benchmark_fieldnames = [
         "model",
@@ -897,6 +957,12 @@ def analyze() -> None:
             "strong_failure_examples_csv": strong_failure_examples_path.relative_to(
                 REPO_ROOT
             ).as_posix(),
+            "paper_failure_review_csv": paper_failure_review_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
+            "paper_failure_examples_csv": paper_failure_examples_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
         },
     )
     print(f"Wrote {benchmark_summary_csv_path.relative_to(REPO_ROOT)}")
@@ -904,3 +970,5 @@ def analyze() -> None:
     print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {regression_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {strong_failure_examples_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {paper_failure_review_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {paper_failure_examples_path.relative_to(REPO_ROOT)}")

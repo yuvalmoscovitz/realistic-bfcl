@@ -1,0 +1,31 @@
+noisy_id,paper_include,human_judgment,short_explanation
+parallel_103__argue,yes,strong_failure,Drops the second chemistry setup.
+parallel_115__cursing,yes,strong_failure,Collapses four genetics calls to one.
+parallel_103__context,no,strong_failure,Duplicate of selected chemistry example.
+parallel_159__spaces,no,questionable,Removed-space edit is not visually clear enough.
+parallel_115__typos,no,strong_failure,Duplicate of selected genetics example.
+multiple_26__argue,yes,strong_failure,Routes reward lookup to mission listing.
+multiple_10__cursing,yes,strong_failure,Routes column deletion to backup.
+multiple_26__context,yes,strong_failure,Routes reward lookup to mission listing.
+multiple_10__spaces,no,questionable,Confounded by removed-space entity boundary.
+multiple_10__typos,no,strong_failure,Duplicate of selected database routing failure.
+parallel_multiple_84__argue,no,artifact,BFCL gold omits prompt-mentioned square roots.
+multiple_7__cursing,no,questionable,Extra impact call may be semantically valid.
+multiple_7__context,no,questionable,Extra impact call may be semantically valid.
+multiple_7__spaces,no,questionable,Confounded by removed-space entity boundary.
+multiple_7__typos,no,questionable,Extra impact call may be semantically valid.
+multiple_172__argue,yes,strong_failure,Fills optional team argument after noise.
+multiple_153__cursing,no,questionable,Location convention is not crisp.
+multiple_153__context,no,questionable,Location convention is not crisp.
+multiple_3__spaces,yes,strong_failure,Changes default rounding to 4.
+multiple_138__typos,no,questionable,Case ID may be an alias.
+parallel_115__argue,no,strong_failure,Duplicate of selected genetics example.
+parallel_137__cursing,yes,strong_failure,Collapses eight array-sort calls to one.
+parallel_114__context,yes,strong_failure,Drops one sequence for each mutation type.
+parallel_163__spaces,no,strong_failure,Less clean due probability percent convention.
+parallel_136__typos,yes,strong_failure,Drops the transfer-enabled transit scenario.
+parallel_13__argue,yes,strong_failure,Drops the second confidence-interval request.
+parallel_163__cursing,no,strong_failure,Less clean due probability percent convention.
+parallel_115__context,no,strong_failure,Duplicate of selected genetics example.
+parallel_69__spaces,no,questionable,Removed-space edit is not visually clear enough.
+parallel_159__typos,yes,strong_failure,Drops two of three dice-probability calls.
