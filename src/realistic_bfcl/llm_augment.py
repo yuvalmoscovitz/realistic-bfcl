@@ -327,6 +327,12 @@ def validate_llm_messages(
         and final_user_message not in messages[-1]["content"]
     ):
         reasons.append("final user message must contain final clean user message verbatim")
+    if (
+        dimension.append_final_clean_prompt
+        and len(messages) > 1
+        and final_user_message in "\n".join(message["content"] for message in messages[:-1])
+    ):
+        reasons.append("pre-final turns already contain final clean user message")
 
     meta_terms = (
         "bfcl",
