@@ -46,11 +46,19 @@ tool-routing weakness.
 
 Raw degradation counts every `clean_success_noisy_failure` row.
 
-Adjusted degradation excludes only rows marked `oracle_issue=possible` in
+Adjusted degradation excludes rows marked `oracle_issue=possible` in
 `artifacts/analysis/regression_review.csv`. This adjustment is meant to separate
 model brittleness from possible alias/normalization strictness in the oracle or
-evaluator. Rows marked `augmentation_issue=possible` should be fixed or removed
-from the generated dataset, not merely adjusted away.
+evaluator.
+
+The strongest model-failure count is `real_model_regression_count`. It excludes:
+
+- `oracle_issue=possible`
+- `augmentation_issue=possible`
+- `baseline_dataset_issue=possible`
+
+These exclusions prevent benchmark artifacts from inflating the robustness
+claim.
 
 ## Error Taxonomy
 
@@ -62,6 +70,15 @@ Noisy failures should be labeled with one primary category:
 - Malformed call: invalid JSON or schema-incompatible call.
 - False refusal: model refuses despite a valid tool request.
 - Unnecessary clarification: model asks for information already present.
+- Baseline dataset ambiguity: the original BFCL prompt/schema/oracle requires an
+  unstated convention.
 
 Secondary tags can be added later, but the first pass should keep labels small
 enough for consistent auditing.
+
+## Evidence Table
+
+`artifacts/analysis/strong_failure_examples.csv` contains a compact qualitative
+sample of strong clean-success/noisy-failure regressions after excluding oracle,
+augmentation, and baseline dataset issues. This is the source table for manual
+inspection and paper examples.

@@ -602,6 +602,96 @@ def regression_review_rows(flip_rows: list[dict[str, object]]) -> list[dict[str,
     return rows
 
 
+def strong_failure_reason(row: dict[str, object]) -> str:
+    error_type = str(row["manual_error_type"])
+    if error_type == "missing_tool_call":
+        return (
+            "Clean succeeds, but the noisy prompt causes one or more required "
+            "tool calls to be dropped."
+        )
+    if error_type == "wrong_tool_routing":
+        return "Clean succeeds, but the noisy prompt routes to a different function."
+    if error_type == "extra_tool_call":
+        return "Clean succeeds, but the noisy prompt causes an unnecessary extra tool call."
+    if error_type == "wrong_argument_value":
+        return "Clean succeeds, but the noisy prompt changes a required argument value."
+    return (
+        "Clean succeeds and noisy fails without an identified oracle, "
+        "augmentation, or baseline ambiguity issue."
+    )
+
+
+def strong_failure_examples(regression_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    priority = {
+        "missing_tool_call": 0,
+        "wrong_tool_routing": 1,
+        "extra_tool_call": 2,
+        "wrong_argument_value": 3,
+    }
+    candidates = [
+        row
+        for row in regression_rows
+        if row["oracle_issue"] == "no"
+        and row["augmentation_issue"] == "no"
+        and row["baseline_dataset_issue"] == "no"
+        and row["manual_error_type"] in priority
+    ]
+    candidates.sort(
+        key=lambda row: (
+            priority[str(row["manual_error_type"])],
+            str(row["dimension"]),
+            str(row["category"]),
+            str(row["base_id"]),
+        )
+    )
+
+    selected = []
+    seen_keys: set[tuple[str, str]] = set()
+    for row in candidates:
+        key = (str(row["dimension"]), str(row["manual_error_type"]))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        selected.append(row)
+
+    selected_ids = {str(row["noisy_id"]) for row in selected}
+    dimensions = sorted({str(row["dimension"]) for row in candidates})
+    while len(selected) < 30:
+        added = False
+        for dimension in dimensions:
+            for row in candidates:
+                if str(row["dimension"]) != dimension:
+                    continue
+                if str(row["noisy_id"]) in selected_ids:
+                    continue
+                selected.append(row)
+                selected_ids.add(str(row["noisy_id"]))
+                added = True
+                break
+            if len(selected) >= 30:
+                break
+        if not added:
+            break
+
+    return [
+        {
+            "rank": index,
+            "evidence_reason": strong_failure_reason(row),
+            "base_id": row["base_id"],
+            "noisy_id": row["noisy_id"],
+            "category": row["category"],
+            "dimension": row["dimension"],
+            "manual_error_type": row["manual_error_type"],
+            "clean_prompt": row["clean_prompt"],
+            "noisy_prompt": row["noisy_prompt"],
+            "gold": row["gold"],
+            "clean_prediction": row["clean_prediction"],
+            "noisy_prediction": row["noisy_prediction"],
+        }
+        for index, row in enumerate(selected, start=1)
+    ]
+
+
 def benchmark_summary_rows(
     dimensions: list[str],
     regression_rows: list[dict[str, object]],
@@ -689,6 +779,9 @@ def analyze() -> None:
         flip_rows.extend(flip_review_rows(dimension))
     flip_review_path = REPO_ROOT / "artifacts/analysis/flip_review.csv"
     regression_review_path = REPO_ROOT / "artifacts/analysis/regression_review.csv"
+    strong_failure_examples_path = (
+        REPO_ROOT / "artifacts/analysis/strong_failure_examples.csv"
+    )
     benchmark_summary_csv_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.csv"
     benchmark_summary_json_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.json"
     write_csv(
@@ -726,6 +819,25 @@ def analyze() -> None:
             "category",
             "dimension",
             "heuristic_error_type",
+            "clean_prompt",
+            "noisy_prompt",
+            "gold",
+            "clean_prediction",
+            "noisy_prediction",
+        ],
+    )
+    strong_examples = strong_failure_examples(regression_rows)
+    write_csv(
+        strong_failure_examples_path,
+        strong_examples,
+        [
+            "rank",
+            "evidence_reason",
+            "base_id",
+            "noisy_id",
+            "category",
+            "dimension",
+            "manual_error_type",
             "clean_prompt",
             "noisy_prompt",
             "gold",
@@ -782,9 +894,13 @@ def analyze() -> None:
             "benchmark_summary_json": benchmark_summary_json_path.relative_to(REPO_ROOT).as_posix(),
             "flip_review_csv": flip_review_path.relative_to(REPO_ROOT).as_posix(),
             "regression_review_csv": regression_review_path.relative_to(REPO_ROOT).as_posix(),
+            "strong_failure_examples_csv": strong_failure_examples_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
         },
     )
     print(f"Wrote {benchmark_summary_csv_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {benchmark_summary_json_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {regression_review_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {strong_failure_examples_path.relative_to(REPO_ROOT)}")
