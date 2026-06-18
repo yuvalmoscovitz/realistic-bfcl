@@ -113,6 +113,25 @@ LLM_DIMENSIONS = (
         ),
         require_final_clean_prompt=True,
     ),
+    LlmDimension(
+        name="llm_frustrated_distractor_context",
+        suffix="llm_frustrated_context",
+        instruction=(
+            "Create one realistic user message with both emotional tone and distracting "
+            "context. The user should sound impatient, skeptical, or casually profane, "
+            "and should mention one concrete stale/background distractor from nearby work "
+            "or life that is explicitly not the current ask. The message must contain "
+            "final_clean_user_message exactly as written as the actionable request. Put "
+            "the distractor before the verbatim request and make it clearly inactive with "
+            "phrasing like ignore that, not what I need, unrelated, old note, stale, or "
+            "I changed my mind. Include strong tone such as profanity, 'you got this "
+            "wrong before', 'don't guess', or 'please be right this time'. Do not "
+            "paraphrase, shorten, translate, or modify the embedded request. Do not add "
+            "any new active constraints. The inactive distractor must not reuse exact "
+            "entities, IDs, quoted strings, or argument values from the final request."
+        ),
+        require_final_clean_prompt=True,
+    ),
 )
 
 SENSITIVE_SLOT_TERMS = {
@@ -142,6 +161,29 @@ PRESERVED_DIRECTIVE_TERMS = (
     "using your tools",
 )
 PROFANITY_TERMS = ("fuck", "fucking", "shit", "bullshit", "goddamn", "ffs")
+ARGUMENTATIVE_TONE_TERMS = (
+    "wrong before",
+    "don't guess",
+    "dont guess",
+    "do not guess",
+    "be right",
+    "right this time",
+    "messed",
+    "you keep",
+    "last time",
+)
+INACTIVE_CONTEXT_MARKERS = (
+    "ignore",
+    "unrelated",
+    "not what i need",
+    "not what i'm asking",
+    "old note",
+    "stale",
+    "background",
+    "abandoned",
+    "changed my mind",
+    "not the current",
+)
 
 
 def llm_augment_model() -> str:
@@ -250,11 +292,17 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "clean prompt already disambiguates them.",
                 "When final_message_verbatim_required is true, the final user message "
                 "must contain final_clean_user_message exactly as written.",
-                "For llm_profane_frustration and llm_argumentative_challenge, return "
-                "exactly one user message. Put the final_clean_user_message verbatim "
-                "inside that message and add only realistic tone before or after it.",
+                "For llm_profane_frustration, llm_argumentative_challenge, and "
+                "llm_frustrated_distractor_context, return exactly one user message. "
+                "Put the final_clean_user_message verbatim inside that message.",
                 "For llm_profane_frustration, include at least one natural profanity "
                 "outside the verbatim final_clean_user_message.",
+                "For llm_frustrated_distractor_context, include one concrete distractor "
+                "before the verbatim request and explicitly mark it as inactive, stale, "
+                "background, unrelated, ignored, or abandoned. Also include strong tone: "
+                "either natural profanity or explicit skepticism/pressure to be correct. "
+                "The distractor must not reuse exact entities, IDs, quoted strings, or "
+                "argument values from final_clean_user_message.",
                 "When append_final_clean_prompt is true, do not include the final user "
                 "request in your output messages. Generate only the realistic pre-final "
                 "conversation; the final_clean_user_message will be appended by code.",
@@ -358,7 +406,12 @@ def validate_llm_messages(
                     f"{term!r} for property {property_name!r}"
                 )
 
-    if dimension.name in {"llm_profane_frustration", "llm_argumentative_challenge"}:
+    single_turn_dimensions = {
+        "llm_profane_frustration",
+        "llm_argumentative_challenge",
+        "llm_frustrated_distractor_context",
+    }
+    if dimension.name in single_turn_dimensions:
         if len(messages) != 1:
             reasons.append(f"{dimension.name} must return exactly one user message")
         elif messages[0]["role"] != "user":
@@ -367,6 +420,38 @@ def validate_llm_messages(
         term in lowered_text for term in PROFANITY_TERMS
     ):
         reasons.append("llm_profane_frustration must include profanity")
+    if dimension.name == "llm_frustrated_distractor_context":
+        has_strong_tone = any(term in lowered_text for term in PROFANITY_TERMS) or any(
+            term in lowered_text for term in ARGUMENTATIVE_TONE_TERMS
+        )
+        if not has_strong_tone:
+            reasons.append(
+                "llm_frustrated_distractor_context must include profanity or strong skepticism"
+            )
+        if not any(marker in lowered_text for marker in INACTIVE_CONTEXT_MARKERS):
+            reasons.append(
+                "llm_frustrated_distractor_context must explicitly mark distractors inactive"
+            )
+        if final_user_message in augmented_text:
+            prefix_text = augmented_text.split(final_user_message, 1)[0]
+            lowered_prefix = prefix_text.lower()
+            for quoted in quoted_literals(clean_prompt):
+                bare_quoted = quoted.strip("'\"").lower()
+                if bare_quoted and bare_quoted in lowered_prefix:
+                    reasons.append(
+                        "llm_frustrated_distractor_context prefix reused clean quoted "
+                        f"literal: {quoted!r}"
+                    )
+            for literal in primitive_gold_values(example["ground_truth"]):
+                if (
+                    isinstance(literal, str)
+                    and literal_visible_in_text(literal, clean_prompt)
+                    and literal_visible_in_text(literal, prefix_text)
+                ):
+                    reasons.append(
+                        "llm_frustrated_distractor_context prefix reused visible gold "
+                        f"literal: {literal!r}"
+                    )
 
     if not messages:
         reasons.append("augmentation returned no messages")

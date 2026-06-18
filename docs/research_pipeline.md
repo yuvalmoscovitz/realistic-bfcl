@@ -71,6 +71,7 @@ Current LLM dimensions:
 - `llm_messy_pre_intent_history`
 - `llm_profane_frustration`
 - `llm_argumentative_challenge`
+- `llm_frustrated_distractor_context`
 
 `llm_messy_pre_intent_history` models semi-relevant chat before the user has a
 specific intent. The generator creates only the pre-final turns; the final user
@@ -84,6 +85,11 @@ constraints that conflict with or narrow the final request.
 `llm_profane_frustration` and `llm_argumentative_challenge` are single-turn tone
 dimensions. They keep the clean request embedded verbatim and only add realistic
 frustration, profanity, skepticism, or pressure around it.
+
+`llm_frustrated_distractor_context` combines the strongest simple ingredients:
+strong tone and one explicitly inactive distractor before the exact clean
+request. It is intended to test whether models overfit nearby context even when
+the current ask is still verbatim and unambiguous.
 
 ## 3. Run BFCL-Style Evaluation
 
