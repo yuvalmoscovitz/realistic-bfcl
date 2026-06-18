@@ -1322,6 +1322,153 @@ def count_by(rows: list[dict[str, object]], key: str) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def flat_values(value: object) -> list[object]:
+    if isinstance(value, dict):
+        values = []
+        for child in value.values():
+            values.extend(flat_values(child))
+        return values
+    if isinstance(value, list):
+        values = []
+        for child in value:
+            values.extend(flat_values(child))
+        return values
+    return [value]
+
+
+def compact_text(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value).lower())
+
+
+def parsed_json_value(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def gold_values(gold: object) -> list[str]:
+    values = []
+    for arguments in gold_arguments(gold):
+        values.extend(
+            str(value) for value in flat_values(arguments) if value not in ("", None)
+        )
+    return values
+
+
+def typo_copied_into_argument(
+    clean_prompt: str, noisy_prompt: str, noisy_prediction: object
+) -> bool:
+    clean_tokens = set(re.findall(r"[A-Za-z][A-Za-z']+", clean_prompt))
+    noisy_tokens = set(re.findall(r"[A-Za-z][A-Za-z']+", noisy_prompt))
+    introduced_tokens = {
+        token.lower() for token in noisy_tokens - clean_tokens if len(token) >= 4
+    }
+    argument_text = json.dumps(call_arguments(noisy_prediction)).lower()
+    return any(token in argument_text for token in introduced_tokens)
+
+
+def likely_alias_or_normalization_issue(gold: object, noisy_prediction: object) -> bool:
+    accepted_values = gold_values(gold)
+    noisy_values = [
+        str(value)
+        for arguments in call_arguments(noisy_prediction)
+        for value in flat_values(arguments)
+    ]
+    for noisy_value in noisy_values:
+        compact_noisy = compact_text(noisy_value)
+        if not compact_noisy:
+            continue
+        for accepted_value in accepted_values:
+            compact_accepted = compact_text(accepted_value)
+            if (
+                compact_accepted
+                and compact_accepted != compact_noisy
+                and (
+                    compact_accepted in compact_noisy
+                    or compact_noisy in compact_accepted
+                )
+            ):
+                return True
+    return False
+
+
+def regression_label(review: dict[str, object]) -> dict[str, str]:
+    gold = parsed_json_value(review["gold"])
+    noisy_prediction = parsed_json_value(review["noisy_prediction"])
+    heuristic = str(review["heuristic_error_type"])
+    noisy_names = call_names(noisy_prediction)
+    expected_names = gold_call_names(gold)
+    oracle_issue = "no"
+    augmentation_issue = "no"
+
+    if heuristic == "call_count_mismatch":
+        if len(noisy_names) < len(expected_names):
+            manual_error_type = "missing_tool_call"
+            notes = "Noisy prediction emits fewer calls than the gold oracle."
+        elif len(noisy_names) > len(expected_names):
+            manual_error_type = "extra_tool_call"
+            notes = "Noisy prediction emits more calls than the gold oracle."
+        else:
+            manual_error_type = "call_count_mismatch"
+            notes = "Noisy prediction call count differs from the gold oracle."
+    elif heuristic == "routing_error":
+        manual_error_type = "wrong_tool_routing"
+        notes = "Noisy prediction calls a different tool than the gold oracle."
+    elif heuristic == "argument_value_error":
+        if str(review["dimension"]) == "typos" and typo_copied_into_argument(
+            str(review["clean_prompt"]),
+            str(review["noisy_prompt"]),
+            noisy_prediction,
+        ):
+            manual_error_type = "typo_copied_into_argument_value"
+            augmentation_issue = "possible"
+            notes = "The typo appears to have been copied into an argument value."
+        elif likely_alias_or_normalization_issue(gold, noisy_prediction):
+            manual_error_type = "entity_or_alias_normalization_mismatch"
+            oracle_issue = "possible"
+            notes = (
+                "Noisy prediction appears semantically close but uses a different "
+                "alias or formatting than accepted gold."
+            )
+        else:
+            manual_error_type = "wrong_argument_value"
+            notes = (
+                "Noisy prediction uses the right tool and call count, but at least "
+                "one argument value differs."
+            )
+    elif heuristic == "argument_drop":
+        manual_error_type = "argument_drop"
+        notes = "Noisy prediction omits an argument required by the gold oracle."
+    elif heuristic == "argument_hallucination":
+        manual_error_type = "argument_hallucination"
+        notes = "Noisy prediction adds an argument not present in the gold oracle."
+    elif heuristic == "no_call":
+        manual_error_type = "no_tool_call"
+        notes = "Noisy prediction did not emit a tool call."
+    elif heuristic == "malformed_arguments":
+        manual_error_type = "malformed_call"
+        notes = "Noisy prediction emitted malformed tool-call arguments."
+    else:
+        manual_error_type = "other"
+        notes = "Needs manual inspection."
+
+    if str(review["dimension"]) == "argumentative_challenge":
+        notes += " The argumentative wrapper may have distracted call decomposition."
+    if str(review["dimension"]) == "removed_spaces":
+        notes += " Missing whitespace may have reduced parsing of slots or calls."
+
+    return {
+        "review_status": "labeled_v1",
+        "manual_error_type": manual_error_type,
+        "oracle_issue": oracle_issue,
+        "augmentation_issue": augmentation_issue,
+        "notes": notes,
+    }
+
+
 def analysis_review_row(
     row: dict[str, object],
     clean_examples: dict[str, dict[str, object]],
@@ -1518,13 +1665,10 @@ def regression_review_rows(flip_rows: list[dict[str, object]]) -> list[dict[str,
     for row in flip_rows:
         if row["outcome"] != "clean_success_noisy_failure":
             continue
+        label = regression_label(row)
         rows.append(
             {
-                "review_status": "",
-                "manual_error_type": "",
-                "oracle_issue": "",
-                "augmentation_issue": "",
-                "notes": "",
+                **label,
                 "base_id": row["base_id"],
                 "noisy_id": row["noisy_id"],
                 "category": row["category"],
