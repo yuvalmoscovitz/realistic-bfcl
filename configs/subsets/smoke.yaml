@@ -6,7 +6,8 @@ subset:
     - multiple
     - parallel
     - parallel_multiple
-  max_examples: 1000
+  max_examples: 400
+  examples_per_category: 100
   selection:
     deterministic: true
     seed: 20260616

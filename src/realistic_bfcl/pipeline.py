@@ -124,7 +124,7 @@ STAGES: tuple[Stage, ...] = (
         name="review-augmentations",
         purpose="Write a wide CSV with one base row and five augmented prompt columns.",
         inputs=("artifacts/frozen/clean_subset.jsonl", "artifacts/generated/"),
-        outputs=("artifacts/generated/augmentation_50_review.csv",),
+        outputs=("artifacts/generated/augmentation_review.csv",),
         next_action="Inspect the CSV and decide which augmentations are realistic enough.",
     ),
     Stage(
@@ -372,6 +372,7 @@ def bfcl_eval_root() -> Path:
 def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
     categories = read_list_setting(subset_config, "bfcl_categories")
     max_examples = read_int_setting(subset_config, "max_examples")
+    examples_per_category = read_int_setting(subset_config, "examples_per_category")
     data_root = bfcl_data_root()
     rows: list[dict[str, object]] = []
 
@@ -379,6 +380,7 @@ def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
         question_file, answer_file = BFCL_CATEGORY_FILES[category]
         questions = read_jsonl(data_root / question_file)
         answers = {row["id"]: row for row in read_jsonl(data_root / answer_file)}
+        category_count = 0
         for question in questions:
             answer = answers[question["id"]]
             rows.append(
@@ -390,6 +392,9 @@ def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
                     "ground_truth": answer["ground_truth"],
                 }
             )
+            category_count += 1
+            if category_count >= examples_per_category:
+                break
             if len(rows) >= max_examples:
                 break
         if len(rows) >= max_examples:
@@ -764,7 +769,7 @@ def prompt_text(example: dict[str, object]) -> str:
 
 def review_augmentations() -> None:
     clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
-    output_path = REPO_ROOT / "artifacts/generated/augmentation_50_review.csv"
+    output_path = REPO_ROOT / "artifacts/generated/augmentation_review.csv"
 
     if not clean_path.exists():
         raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
@@ -993,6 +998,9 @@ def freeze_bfcl() -> None:
                 "config_sha256": file_sha256(subset_config),
                 "categories": categories,
                 "max_examples": read_int_setting(subset_config, "max_examples"),
+                "examples_per_category": read_int_setting(
+                    subset_config, "examples_per_category"
+                ),
                 "materialized_path": "artifacts/frozen/clean_subset.jsonl",
                 "materialized_sha256": file_sha256(subset_path),
                 "materialized_total": len(read_jsonl(subset_path)),
