@@ -15,6 +15,14 @@ Command:
 python scripts/run_stage.py prepare-subset
 ```
 
+The default subset config is `configs/subsets/smoke.yaml`. For the larger
+single-turn pilot, use:
+
+```bash
+REALISTIC_BFCL_SUBSET_CONFIG=configs/subsets/expanded_live.yaml \
+  python scripts/run_stage.py prepare-subset
+```
+
 Purpose:
 - Pin the BFCL upstream commit.
 - Materialize the configured stratified clean subset.
@@ -90,6 +98,7 @@ Primary outputs:
 
 ## Scaling Rule
 
-The 400-example stratified run is the first pilot. After checking the adjusted
-degradation and regression taxonomy, scale to 1000 examples with the same model
-and dimensions before adding new models or new augmentation types.
+The 400-example stratified run is the smoke test. The next pilot uses
+`configs/subsets/expanded_live.yaml`, which keeps the original four categories
+and adds single-turn BFCL live categories that have gold answers. Add new models
+only after this expanded pilot is stable.

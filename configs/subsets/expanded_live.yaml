@@ -1,0 +1,19 @@
+subset:
+  name: expanded_live
+  purpose: Larger single-turn pilot that adds BFCL live categories with gold answers.
+  bfcl_categories:
+    - simple_python
+    - multiple
+    - parallel
+    - parallel_multiple
+    - live_simple
+    - live_multiple
+    - live_parallel
+    - live_parallel_multiple
+  max_examples: 2000
+  examples_per_category: 400
+  selection:
+    deterministic: true
+    seed: 20260618
+    include_only_examples_with_stable_gold_oracles: true
+    note: memory, multi-turn, web-search, Java, and JavaScript categories are excluded.
