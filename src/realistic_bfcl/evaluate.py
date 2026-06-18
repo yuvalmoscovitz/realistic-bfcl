@@ -69,7 +69,7 @@ def bfcl_eval_root() -> Path:
     )
 
 
-def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
+def materialize_subset(subset_config: Path, manifest_path: Path) -> Path:
     categories = read_list_setting(subset_config, "bfcl_categories")
     max_examples = read_int_setting(subset_config, "max_examples")
     examples_per_category = read_int_setting(subset_config, "examples_per_category")
@@ -435,11 +435,16 @@ def run_openai_prediction(example: dict[str, object], api_key: str) -> dict[str,
 
 def freeze_bfcl() -> None:
     project_config = REPO_ROOT / "configs/project.yaml"
-    subset_config = REPO_ROOT / "configs/subsets/smoke.yaml"
+    subset_config = Path(
+        os.environ.get("REALISTIC_BFCL_SUBSET_CONFIG", "configs/subsets/smoke.yaml")
+    )
+    if not subset_config.is_absolute():
+        subset_config = REPO_ROOT / subset_config
     manifest_path = REPO_ROOT / "artifacts/frozen/bfcl_manifest.json"
     reject_placeholders((project_config, subset_config))
     categories = read_list_setting(subset_config, "bfcl_categories")
-    subset_path = materialize_smoke_subset(subset_config, manifest_path)
+    subset_path = materialize_subset(subset_config, manifest_path)
+    config_path = subset_config.relative_to(REPO_ROOT).as_posix()
 
     write_json(
         manifest_path,
@@ -451,7 +456,7 @@ def freeze_bfcl() -> None:
                 "evaluator_version": f"gorilla@{BFCL_COMMIT}",
             },
             "clean_subset": {
-                "config_path": "configs/subsets/smoke.yaml",
+                "config_path": config_path,
                 "config_sha256": file_sha256(subset_config),
                 "categories": categories,
                 "max_examples": read_int_setting(subset_config, "max_examples"),

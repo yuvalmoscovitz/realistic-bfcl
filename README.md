@@ -33,6 +33,7 @@ configs/
   project.yaml                 Reproducibility pins and current assumptions.
   realism_dimensions.yaml      Current realism dimensions and limits.
   subsets/smoke.yaml           Current stratified clean subset definition.
+  subsets/expanded_live.yaml   Larger single-turn pilot with BFCL live categories.
 docs/
   paper_flow.md                Compact paper/story structure for the benchmark.
   research_pipeline.md         Research workflow and artifact contract.
@@ -65,6 +66,13 @@ make analyze
 
 `prepare-subset` freezes the BFCL substrate and materializes the configured
 clean subset.
+
+By default it uses `configs/subsets/smoke.yaml`. To materialize the larger
+single-turn pilot, run:
+
+```bash
+REALISTIC_BFCL_SUBSET_CONFIG=configs/subsets/expanded_live.yaml make prepare-subset
+```
 
 `augment` creates the frozen noisy dataset once. It currently writes five
 oracle-preserving dimensions:

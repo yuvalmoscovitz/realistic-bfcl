@@ -40,6 +40,22 @@ BFCL_CATEGORY_FILES = {
         "BFCL_v4_parallel_multiple.json",
         "possible_answer/BFCL_v4_parallel_multiple.json",
     ),
+    "live_simple": (
+        "BFCL_v4_live_simple.json",
+        "possible_answer/BFCL_v4_live_simple.json",
+    ),
+    "live_multiple": (
+        "BFCL_v4_live_multiple.json",
+        "possible_answer/BFCL_v4_live_multiple.json",
+    ),
+    "live_parallel": (
+        "BFCL_v4_live_parallel.json",
+        "possible_answer/BFCL_v4_live_parallel.json",
+    ),
+    "live_parallel_multiple": (
+        "BFCL_v4_live_parallel_multiple.json",
+        "possible_answer/BFCL_v4_live_parallel_multiple.json",
+    ),
 }
 DIMENSION_FILES = {
     "typos": "typos.jsonl",
