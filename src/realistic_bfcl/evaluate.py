@@ -152,32 +152,52 @@ def bfcl_messages(example: dict[str, object]) -> list[dict[str, str]]:
 
 
 def openai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object]:
-    request = urllib.request.Request(
-        OPENAI_RESPONSES_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    request_data = json.dumps(payload).encode("utf-8")
+    request_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
     for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
+        request = urllib.request.Request(
+            OPENAI_RESPONSES_URL,
+            data=request_data,
+            headers=request_headers,
+            method="POST",
+        )
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")
             if error.code in RETRYABLE_HTTP_STATUS and attempt < OPENAI_MAX_ATTEMPTS:
-                time.sleep(2**attempt)
+                time.sleep(openai_retry_delay(error, body, attempt))
                 continue
             raise RuntimeError(f"OpenAI API request failed: HTTP {error.code}: {body}") from error
         except urllib.error.URLError as error:
             if attempt < OPENAI_MAX_ATTEMPTS:
-                time.sleep(2**attempt)
+                time.sleep(min(60, 2**attempt))
                 continue
             raise RuntimeError(f"OpenAI API request failed: {error}") from error
 
     raise RuntimeError("OpenAI API request failed without returning a response.")
+
+
+def openai_retry_delay(error: urllib.error.HTTPError, body: str, attempt: int) -> float:
+    retry_after = error.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return max(1.0, float(retry_after))
+        except ValueError:
+            pass
+    match = re.search(r"try again in ([0-9.]+)(ms|s)", body, flags=re.IGNORECASE)
+    if match:
+        delay = float(match.group(1))
+        if match.group(2).lower() == "ms":
+            delay /= 1000
+        return max(1.0, delay)
+    if error.code == 429:
+        return min(60, 4 * attempt)
+    return min(60, 2**attempt)
 
 
 def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[str, object]:
