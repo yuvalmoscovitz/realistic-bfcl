@@ -17,30 +17,30 @@ from .common import (
 Cursing = str
 
 CURSING_TEMPLATES: tuple[Cursing, ...] = (
-    "for fuck sake {prompt}",
+    "man for fuck sake {prompt}",
     "holy shit just {prompt}",
-    "this is annoying, {prompt}",
+    "this is bullshit {prompt}",
     "goddamn it {prompt}",
-    "i'm tired of this, {prompt}",
-    "ffs {prompt}",
+    "{prompt} fucking please man",
+    "ffs {prompt} brother",
 )
 
 IRRELEVANT_CONTEXT_TEMPLATES = (
-    "it was horrible today but anyway, {prompt}",
-    "my commute was a mess. unrelated, {prompt}",
-    "i'm in the middle of three things right now; {prompt}",
-    "the meeting earlier was useless, but can you do this: {prompt}",
-    "my laptop is being weird today. {prompt}",
-    "i spilled coffee and lost my notes, so {prompt}",
+    "it went horrible today. {prompt}",
+    "my brother thinks he is genius. {prompt}",
+    "i'm in the middle of three things right now. quick {prompt}",
+    "the meeting earlier was useless, {prompt}",
+    "my laptop is being so weird today. {prompt}",
+    "i spilled coffee and lost my notes, please {prompt}",
 )
 
 ARGUMENTATIVE_TEMPLATES = (
-    "you are wrong all the time, what do you really think is {prompt}",
-    "last time you messed this up, so answer carefully: {prompt}",
+    "you are wrong all the time, come on {prompt}",
+    "last time you messed this up, so answer carefully {prompt}",
     "i don't trust your first answer, but {prompt}",
-    "prove you can actually do this: {prompt}",
-    "you keep getting these wrong. {prompt}",
-    "be honest and don't dodge it: {prompt}",
+    "prove you can actually do this, {prompt}",
+    "you keep getting everything wrong. {prompt}",
+    "can you be right just one time in you life??? {prompt}",
 )
 
 TYPO_REPLACEMENTS = (
