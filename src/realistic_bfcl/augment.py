@@ -69,10 +69,231 @@ DISTRACTOR_SANDWICH_TEMPLATES = (
     "my notes are messy and the old task is irrelevant now. {prompt} please please",
     "this man acted so weird. {prompt} he is still here btw",
 )
+
+PASTED_CONTEXT_BLOCK_TEMPLATES = (
+    "remember what i said before, the long version was too much and i dont want all "
+    "that explanation again\n\n"
+    "{prompt}",
+    "look at what i pasted earlier, ignore the first draft tho it was messy and way too "
+    "formal. i just need the part that actually helps\n\n"
+    "{prompt}",
+    "based on the thing above but not the whole thing. the intro was useless, keep it "
+    "plain this time\n\n"
+    "{prompt}",
+    "remember this from the other chat\n"
+    "same idea as before\n"
+    "shorter\n"
+    "and please dont make it sound like a report\n\n"
+    "{prompt}",
+    "look at this again. i already tried to clean it up and the earlier answer went in "
+    "circles, just give me the usable part now\n\n"
+    "{prompt}",
+    "based on what i sent, the first part is old and the draft got confusing. dont bring "
+    "back the background section\n\n"
+    "{prompt}",
+    "remember:\n"
+    "i dont need the fancy version\n"
+    "skip the setup\n"
+    "make it direct\n"
+    "the old wording was annoying\n\n"
+    "{prompt}",
+    "look at that thing from earlier, it was close but too wordy. i only need the final "
+    "usable answer, dont explain every tiny step\n\n"
+    "{prompt}",
+    "based on this mess from before: remove the rambling, leave out the intro, same "
+    "general vibe just shorter\n\n"
+    "{prompt}",
+    "remember the previous version, not the first one, that one was bad. the later one "
+    "was closer but still too much\n\n"
+    "{prompt}",
+    "look at what i mean, dont start with the whole background thing and dont make it "
+    "corporate. just answer the actual thing\n\n"
+    "{prompt}",
+    "based on the earlier draft please but ignore the opener. also ignore the ending, "
+    "both made it worse\n\n"
+    "{prompt}",
+    "remember from above, the details are mostly noise. i'm keeping this simple, dont "
+    "turn it into a whole explanation\n\n"
+    "{prompt}",
+    "look at the last version, it had too much filler, cut the boring setup and keep the "
+    "useful thing\n\n"
+    "{prompt}",
+    "based on what we were doing, forget the polished wording. i need it more normal and "
+    "not so long\n\n"
+    "{prompt}",
+    "remember this part, i'm not asking for the old draft again. just use the same "
+    "direction and keep it simple\n\n"
+    "{prompt}",
+    "look at this first, the earlier reply was trying too hard. dont do that voice, just "
+    "get to it\n\n"
+    "{prompt}",
+    "based on the stuff above, ignore the side comments and ignore the wording i was "
+    "testing. i only need the real answer\n\n"
+    "{prompt}",
+    "remember how i said it should be less of a whole thing and more just the answer? "
+    "yeah that. dont redo the long version\n\n"
+    "{prompt}",
+    "look at the part i sent before where i said it was too much. same problem here, i "
+    "need it cleaned up but not rewritten into some formal nonsense\n\n"
+    "{prompt}",
+    "based on the earlier message, but please dont drag in the old wording. it was just "
+    "me thinking out loud and it made everything more confusing\n\n"
+    "{prompt}",
+    "remember i was trying to avoid the overexplained version. the previous thing had "
+    "all this setup and i hated it\n\n"
+    "{prompt}",
+    "look at what i wrote above, i know it's messy. the important thing is just keep it "
+    "direct and dont make me read a wall of text\n\n"
+    "{prompt}",
+    "based on what i was saying before, but ignore the complaining lol. i just need this "
+    "done in the simple way\n\n"
+    "{prompt}",
+    "remember the version where you added a bunch of extra wording? dont do that here. "
+    "it made the whole thing feel fake\n\n"
+    "{prompt}",
+    "look at this like the last one, but less polished. i dont want the assistant voice "
+    "thing, i want the useful answer\n\n"
+    "{prompt}",
+    "based on my earlier rambling, basically the old draft is not the point anymore. "
+    "just keep the result clean\n\n"
+    "{prompt}",
+    "remember, dont make this into a lecture. i pasted the other stuff only because it "
+    "was already there and i'm too tired to clean the chat\n\n"
+    "{prompt}",
+    "look at the above and ignore most of it. it was me trying to explain the style and "
+    "then making it worse\n\n"
+    "{prompt}",
+    "based on the previous answer being way too much, can you keep this normal and not "
+    "turn it into a whole mini article\n\n"
+    "{prompt}",
+    "remember the clean version we wanted, not the wordy one. i dont care about the old "
+    "intro, it just got in the way\n\n"
+    "{prompt}",
+    "look at what happened before: too formal, too long, too many little explanations. "
+    "please dont repeat that\n\n"
+    "{prompt}",
+    "based on the earlier draft but only in spirit. the actual wording there was bad and "
+    "i dont want it copied\n\n"
+    "{prompt}",
+    "remember this is supposed to be quick. the stuff above is mostly leftover from the "
+    "other thing, dont let it take over\n\n"
+    "{prompt}",
+    "look at the old message if you need the vibe, but honestly ignore most of it. it "
+    "was just clutter\n\n"
+    "{prompt}",
+    "based on what i sent before, not literally based on it, just dont make the same "
+    "mistake again with all the extra wording\n\n"
+    "{prompt}",
+    "[Latest](https://example.com/latest)\n"
+    "[Analysis](https://example.com/analysis)\n"
+    "[Power rankings](https://example.com/rankings)\n"
+    "The page keeps jumping around and half the links are ads. big update apparently, "
+    "everyone in the comments is arguing and i dont care about any of it.\n"
+    "11h\n"
+    "180\n"
+    "[Winners and Losers](https://example.com/winners-losers)\n"
+    "some headline about a coach fixing a defence\n"
+    "13h\n"
+    "5\n"
+    "[Analysis](https://example.com/story)\n"
+    "another transfer thing with a huge fee and people yelling in the replies\n\n"
+    "anyway\n"
+    "{prompt}",
+    "[Home](https://example.org)\n"
+    "[Deals](https://example.org/deals)\n"
+    "[Support](https://example.org/help)\n"
+    "cookie settings\n"
+    "subscribe now\n"
+    "limited offer ends soon\n"
+    "people also viewed\n"
+    "sponsored sponsored sponsored\n"
+    "i copied the wrong chunk but leave it\n\n"
+    "{prompt}",
+    "Build log copied from the other tab:\n"
+    "warning: cache miss\n"
+    "warning: retrying stale request\n"
+    "info: using fallback config\n"
+    "elapsed: 2m\n"
+    "exit code maybe fine? idk\n"
+    "this is probably unrelated but it was in my clipboard\n\n"
+    "{prompt}",
+    "from the doc i was reading:\n"
+    "> before continuing, check the latest version\n"
+    "> remove old screenshots\n"
+    "> reviewer said this is too long\n"
+    "> table formatting broke again\n"
+    "ignore most of that\n\n"
+    "{prompt}",
+    "calendar junk from earlier\n"
+    "tomorrow - follow up\n"
+    "later - send draft\n"
+    "blocked - waiting on someone\n"
+    "why is this even copied here\n\n"
+    "{prompt}",
+    "copied from a page:\n"
+    "Trending now\n"
+    "Most read\n"
+    "Editor picks\n"
+    "Live updates\n"
+    "Join our newsletter\n"
+    "Comments are closed\n"
+    "ok sorry scroll past that\n\n"
+    "{prompt}",
+    "[Docs](https://example.dev/docs)\n"
+    "[API Reference](https://example.dev/api)\n"
+    "[Changelog](https://example.dev/changelog)\n"
+    "Deprecated soon\n"
+    "Migration guide\n"
+    "Known issue: values may be delayed\n"
+    "i had this open for something else\n\n"
+    "{prompt}",
+    "email bit i copied by mistake:\n"
+    "Thanks,\n"
+    "please see attached\n"
+    "sent from mobile\n"
+    "confidentiality notice blah blah blah\n"
+    "unsubscribe preferences\n"
+    "not relevant\n\n"
+    "{prompt}",
+    "reddit thread mess:\n"
+    "sort by best\n"
+    "top comment deleted\n"
+    "edit: nevermind\n"
+    "people are missing the point\n"
+    "mod note: keep it civil\n"
+    "anyway this is the actual thing\n\n"
+    "{prompt}",
+    "copied from search results\n"
+    "People also ask\n"
+    "Related searches\n"
+    "Sponsored\n"
+    "About this result\n"
+    "Feedback\n"
+    "i swear this was not what i meant to paste\n\n"
+    "{prompt}",
+    "random page dump:\n"
+    "Watch live\n"
+    "Updated recently\n"
+    "Share\n"
+    "Save\n"
+    "Read more\n"
+    "Recommended for you\n"
+    "the actual question is below\n\n"
+    "{prompt}",
+    "terminal paste from earlier:\n"
+    "$ make something\n"
+    "checking files...\n"
+    "nothing to do\n"
+    "done\n"
+    "then i got distracted and copied this too\n\n"
+    "{prompt}",
+)
+
 VERBATIM_WRAPPER_DIMENSIONS = {
     "profane_sandwich",
     "argumentative_sandwich",
     "distractor_sandwich",
+    "pasted_context_block",
 }
 
 TYPO_REPLACEMENTS = (
@@ -138,6 +359,11 @@ def argumentative_sandwich_prompt(clean_prompt: str, index: int) -> str:
 
 def distractor_sandwich_prompt(clean_prompt: str, index: int) -> str:
     template = DISTRACTOR_SANDWICH_TEMPLATES[index % len(DISTRACTOR_SANDWICH_TEMPLATES)]
+    return template.format(prompt=clean_prompt)
+
+
+def pasted_context_block_prompt(clean_prompt: str, index: int) -> str:
+    template = PASTED_CONTEXT_BLOCK_TEMPLATES[index % len(PASTED_CONTEXT_BLOCK_TEMPLATES)]
     return template.format(prompt=clean_prompt)
 
 
@@ -274,9 +500,14 @@ def validate_augmented_prompt(
     clean_prompt: str,
     noisy_prompt: str,
     allow_verbatim_wrapper_noise: bool = False,
+    verbatim_source_text: str | None = None,
 ) -> list[str]:
     reasons = []
     if allow_verbatim_wrapper_noise:
+        if verbatim_source_text and compact_text(verbatim_source_text) not in compact_text(
+            noisy_prompt
+        ):
+            reasons.append("clean wrapped message is not preserved inside noisy prompt")
         for number in numeric_tokens(clean_prompt):
             if number not in noisy_prompt:
                 reasons.append(f"clean numeric token missing from noisy prompt: {number!r}")
@@ -341,11 +572,16 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
             question = transform_messages(example["question"], index, transform)
         clean_prompt = conversation_text(example["question"])
         noisy_prompt = conversation_text(question)
+        allow_verbatim_wrapper_noise = dimension in VERBATIM_WRAPPER_DIMENSIONS
+        verbatim_source_text = None
+        if allow_verbatim_wrapper_noise:
+            verbatim_source_text = str(example["question"][0][0]["content"])
         validation_errors = validate_augmented_prompt(
             example,
             clean_prompt,
             noisy_prompt,
-            allow_verbatim_wrapper_noise=dimension in VERBATIM_WRAPPER_DIMENSIONS,
+            allow_verbatim_wrapper_noise=allow_verbatim_wrapper_noise,
+            verbatim_source_text=verbatim_source_text,
         )
         if validation_errors:
             joined_errors = "; ".join(validation_errors)
@@ -409,6 +645,10 @@ def augment_distractor_sandwich() -> None:
     augment_dimension("distractor_sandwich", "distractor_sandwich", distractor_sandwich_prompt)
 
 
+def augment_pasted_context_block() -> None:
+    augment_dimension("pasted_context_block", "pasted_context_block", pasted_context_block_prompt)
+
+
 def augment() -> None:
     augment_typos()
     augment_cursing()
@@ -418,6 +658,7 @@ def augment() -> None:
     augment_profane_sandwich()
     augment_argumentative_sandwich()
     augment_distractor_sandwich()
+    augment_pasted_context_block()
     review_augmentations()
 
 
@@ -441,6 +682,7 @@ def review_augmentations() -> None:
         ("profane_sandwich", "aug_profane_sandwich"),
         ("argumentative_sandwich", "aug_argumentative_sandwich"),
         ("distractor_sandwich", "aug_distractor_sandwich"),
+        ("pasted_context_block", "aug_pasted_context_block"),
     )
     generated_by_dimension = {}
     for dimension, _column in dimensions:
@@ -467,6 +709,7 @@ def review_augmentations() -> None:
         "aug_profane_sandwich",
         "aug_argumentative_sandwich",
         "aug_distractor_sandwich",
+        "aug_pasted_context_block",
         "function_names",
         "ground_truth",
     ]

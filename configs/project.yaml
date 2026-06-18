@@ -28,6 +28,7 @@ generation:
     - profane_sandwich
     - argumentative_sandwich
     - distractor_sandwich
+    - pasted_context_block
   rejected_by_default:
     - adversarial_word_games
     - random_typos_without_human_plausibility

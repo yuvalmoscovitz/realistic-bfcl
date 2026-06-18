@@ -42,6 +42,7 @@ STAGES: tuple[Stage, ...] = (
             "artifacts/generated/profane_sandwich.jsonl",
             "artifacts/generated/argumentative_sandwich.jsonl",
             "artifacts/generated/distractor_sandwich.jsonl",
+            "artifacts/generated/pasted_context_block.jsonl",
             "artifacts/generated/augmentation_review.csv",
         ),
         next_action="Run BFCL clean/noisy paired evaluation on the frozen dataset.",

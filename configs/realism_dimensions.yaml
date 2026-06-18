@@ -133,3 +133,22 @@ dimensions:
       - adds a second actionable request
       - changes any argument value
       - makes multiple tool calls plausible when the clean oracle has one
+
+  pasted_context_block:
+    status: pilot
+    description: Add messy copied page, log, email, or prior-instruction residue before the exact clean request.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - unrelated pasted webpage or search-result text
+      - unrelated logs, email footers, or document residue
+      - stale editing or style instructions
+      - informal reminders such as look at, remember, or based on
+      - uneven line breaks and pasted-chat residue
+    rejection_rules:
+      - adds a second actionable request
+      - makes pasted entities, dates, locations, counts, or quoted values active constraints
+      - changes any oracle-bearing text in the clean request
