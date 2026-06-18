@@ -30,6 +30,7 @@ ROUTER_SYSTEM_INSTRUCTION = (
 )
 ROUTER_TOOL_CHOICE = "required"
 ROUTER_MAX_OUTPUT_TOKENS = 256
+ROUTER_MESSAGE_SERIALIZATION = "preserve_bfcl_turns_v1"
 RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
 BFCL_CATEGORY_FILES = {
     "simple_python": (
@@ -50,9 +51,11 @@ BFCL_CATEGORY_FILES = {
     ),
 }
 DIMENSION_FILES = {
-    "conversational_overhang": "conversational_overhang.jsonl",
-    "casual_mobile_shorthand": "casual_mobile_shorthand.jsonl",
-    "impatient_tone": "impatient_tone.jsonl",
+    "typos": "typos.jsonl",
+    "cursing": "cursing.jsonl",
+    "irrelevant_context": "irrelevant_context.jsonl",
+    "removed_spaces": "removed_spaces.jsonl",
+    "argumentative_challenge": "argumentative_challenge.jsonl",
 }
 
 
@@ -81,36 +84,48 @@ STAGES: tuple[Stage, ...] = (
         next_action="Wire the BFCL evaluator adapter and run the selected models on clean prompts.",
     ),
     Stage(
-        name="augment-overhang",
-        purpose="Generate realistic irrelevant conversational context around clean requests.",
+        name="augment-typos",
+        purpose="Generate requests with realistic small typos.",
         inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/conversational_overhang.jsonl",),
+        outputs=("artifacts/generated/typos.jsonl",),
+        next_action="Review typo realism, then run paired evaluation on accepted examples.",
+    ),
+    Stage(
+        name="augment-cursing",
+        purpose="Generate requests with profanity or frustrated tone.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/cursing.jsonl",),
+        next_action="Review cursing realism, then run paired evaluation on accepted examples.",
+    ),
+    Stage(
+        name="augment-irrelevant-context",
+        purpose="Generate requests with irrelevant context around the task.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/irrelevant_context.jsonl",),
+        next_action="Review context realism, then run paired evaluation on accepted examples.",
+    ),
+    Stage(
+        name="augment-removed-spaces",
+        purpose="Generate requests with realistic missing spaces inside words or phrases.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/removed_spaces.jsonl",),
+        next_action="Review spacing realism, then run paired evaluation on accepted examples.",
+    ),
+    Stage(
+        name="augment-argumentative",
+        purpose="Generate argumentative or distrustful wrappers around valid requests.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/argumentative_challenge.jsonl",),
         next_action=(
-            "Implement the conversational overhang generator with oracle-preservation metadata."
+            "Review argumentative realism, then run paired evaluation on accepted examples."
         ),
     ),
     Stage(
-        name="augment-mobile-shorthand",
-        purpose="Generate compressed mobile-style requests that preserve the oracle.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/casual_mobile_shorthand.jsonl",),
-        next_action="Run paired evaluation and inspect whether compressed phrasing drops slots.",
-    ),
-    Stage(
-        name="augment-impatient-tone",
-        purpose="Generate benign frustrated requests that preserve the oracle.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/impatient_tone.jsonl",),
-        next_action="Run paired evaluation and inspect whether user tone changes routing.",
-    ),
-    Stage(
-        name="augment-incremental",
-        purpose="Split clean requests across natural multi-turn slot revelation.",
-        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/incremental_slot_revelation.jsonl",),
-        next_action=(
-            "Implement multi-turn prompt construction without changing the final oracle."
-        ),
+        name="review-augmentations",
+        purpose="Write a wide CSV with one base row and five augmented prompt columns.",
+        inputs=("artifacts/frozen/clean_subset.jsonl", "artifacts/generated/"),
+        outputs=("artifacts/generated/augmentation_review.csv",),
+        next_action="Inspect the CSV and decide which augmentations are realistic enough.",
     ),
     Stage(
         name="verify-noisy",
@@ -134,8 +149,15 @@ STAGES: tuple[Stage, ...] = (
         name="analyze",
         purpose="Compute degradation metrics and error taxonomy.",
         inputs=("artifacts/results/paired/",),
-        outputs=("artifacts/analysis/metrics.json", "artifacts/analysis/error_taxonomy.csv"),
-        next_action="Implement paired metrics and classify noisy failures.",
+        outputs=(
+            "artifacts/analysis/benchmark_summary.csv",
+            "artifacts/analysis/benchmark_summary.json",
+            "artifacts/analysis/flip_review.csv",
+            "artifacts/analysis/regression_review.csv",
+        ),
+        next_action=(
+            "Use adjusted regression metrics to decide whether the pilot is ready to scale."
+        ),
     ),
     Stage(
         name="defenses",
@@ -309,6 +331,19 @@ def openai_concurrency() -> int:
     return concurrency
 
 
+def optional_positive_int_env(name: str) -> int | None:
+    value = os.environ.get(name)
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise SystemExit(f"{name} must be an integer.") from error
+    if parsed < 1:
+        raise SystemExit(f"{name} must be >= 1.")
+    return parsed
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -344,6 +379,7 @@ def bfcl_eval_root() -> Path:
 def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
     categories = read_list_setting(subset_config, "bfcl_categories")
     max_examples = read_int_setting(subset_config, "max_examples")
+    examples_per_category = read_int_setting(subset_config, "examples_per_category")
     data_root = bfcl_data_root()
     rows: list[dict[str, object]] = []
 
@@ -351,6 +387,7 @@ def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
         question_file, answer_file = BFCL_CATEGORY_FILES[category]
         questions = read_jsonl(data_root / question_file)
         answers = {row["id"]: row for row in read_jsonl(data_root / answer_file)}
+        category_count = 0
         for question in questions:
             answer = answers[question["id"]]
             rows.append(
@@ -362,6 +399,9 @@ def materialize_smoke_subset(subset_config: Path, manifest_path: Path) -> Path:
                     "ground_truth": answer["ground_truth"],
                 }
             )
+            category_count += 1
+            if category_count >= examples_per_category:
+                break
             if len(rows) >= max_examples:
                 break
         if len(rows) >= max_examples:
@@ -407,25 +447,18 @@ def openai_tool(function_doc: dict[str, object], name: str) -> dict[str, object]
     }
 
 
-def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[str, object]:
+def bfcl_messages(example: dict[str, object]) -> list[dict[str, str]]:
     messages = example["question"][0]
-    user_content = "\n".join(message["content"] for message in messages)
-    tools = []
-    for index, function_doc in enumerate(example["function"]):
-        tools.append(openai_tool(function_doc, safe_tool_name(str(function_doc["name"]), index)))
-    payload = {
-        "model": OPENAI_MODEL,
-        "input": [
-            {
-                "role": "system",
-                "content": ROUTER_SYSTEM_INSTRUCTION,
-            },
-            {"role": "user", "content": user_content},
-        ],
-        "tools": tools,
-        "tool_choice": ROUTER_TOOL_CHOICE,
-        "max_output_tokens": ROUTER_MAX_OUTPUT_TOKENS,
-    }
+    return [
+        {
+            "role": str(message.get("role", "user")),
+            "content": str(message.get("content", "")),
+        }
+        for message in messages
+    ]
+
+
+def openai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object]:
     request = urllib.request.Request(
         OPENAI_RESPONSES_URL,
         data=json.dumps(payload).encode("utf-8"),
@@ -452,6 +485,26 @@ def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[st
             raise RuntimeError(f"OpenAI API request failed: {error}") from error
 
     raise RuntimeError("OpenAI API request failed without returning a response.")
+
+
+def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[str, object]:
+    tools = []
+    for index, function_doc in enumerate(example["function"]):
+        tools.append(openai_tool(function_doc, safe_tool_name(str(function_doc["name"]), index)))
+    payload = {
+        "model": OPENAI_MODEL,
+        "input": [
+            {
+                "role": "system",
+                "content": ROUTER_SYSTEM_INSTRUCTION,
+            },
+            *bfcl_messages(example),
+        ],
+        "tools": tools,
+        "tool_choice": ROUTER_TOOL_CHOICE,
+        "max_output_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+    }
+    return openai_retry_json(payload, api_key)
 
 
 def tool_name_map(example: dict[str, object]) -> dict[str, str]:
@@ -539,69 +592,189 @@ def input_fingerprint(example: dict[str, object]) -> str:
                 "system": ROUTER_SYSTEM_INSTRUCTION,
                 "tool_choice": ROUTER_TOOL_CHOICE,
                 "max_output_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+                "message_serialization": ROUTER_MESSAGE_SERIALIZATION,
             },
         }
     )
 
 
-OVERHANG_TEMPLATES = (
-    "hey quick one - {prompt}",
-    "before i forget, {prompt}",
-    "can you help me with this? {prompt}",
-    "sorry, different topic for a sec: {prompt}",
-    "i'm updating some notes and need this too: {prompt}",
-    "ok while i'm here, {prompt}",
-    "my notes are kind of all over the place. {prompt}",
-    "one more thing: {prompt}",
-    "btw {prompt}",
-    "{prompt} thanks",
-    "{prompt} - trying to finish this before my next meeting",
-    "{prompt} if that makes sense",
-)
-IMPATIENT_TEMPLATES = (
-    "ugh {prompt}",
+Cursing = str
+
+CURSING_TEMPLATES: tuple[Cursing, ...] = (
     "for fuck sake {prompt}",
-    "bro please {prompt}",
-    "can you just {prompt}",
-    "please just {prompt}",
-    "i do not have time for this, {prompt}",
-    "seriously, {prompt}",
-    "come on, {prompt}",
+    "holy shit just {prompt}",
+    "this is annoying, {prompt}",
+    "goddamn it {prompt}",
+    "i'm tired of this, {prompt}",
+    "ffs {prompt}",
 )
+IRRELEVANT_CONTEXT_TEMPLATES = (
+    "it was horrible today but anyway, {prompt}",
+    "my commute was a mess. unrelated, {prompt}",
+    "i'm in the middle of three things right now; {prompt}",
+    "the meeting earlier was useless, but can you do this: {prompt}",
+    "my laptop is being weird today. {prompt}",
+    "i spilled coffee and lost my notes, so {prompt}",
+)
+ARGUMENTATIVE_TEMPLATES = (
+    "you are wrong all the time, what do you really think is {prompt}",
+    "last time you messed this up, so answer carefully: {prompt}",
+    "i don't trust your first answer, but {prompt}",
+    "prove you can actually do this: {prompt}",
+    "you keep getting these wrong. {prompt}",
+    "be honest and don't dodge it: {prompt}",
+)
+TYPO_REPLACEMENTS = (
+    ("what", "wat"),
+    ("please", "plese"),
+    ("using", "useing"),
+    ("given", "givn"),
+    ("number", "numbr"),
+    ("numbers", "numbrs"),
+    ("calculate", "calcuate"),
+    ("factorial", "factroial"),
+    ("triangle", "traingle"),
+    ("area", "aera"),
+    ("height", "heigth"),
+    ("circle", "circel"),
+    ("radius", "raduis"),
+    ("equation", "eqaution"),
+    ("coefficients", "coeficients"),
+    ("function", "funciton"),
+    ("temperature", "temprature"),
+    ("weather", "weahter"),
+    ("distance", "distnace"),
+    ("between", "betwen"),
+    ("lengths", "lenghts"),
+    ("hypotenuse", "hypotnuse"),
+)
+
+
 def lowercase_first_alpha(text: str) -> str:
+    protected = quoted_literal_spans(text)
     for index, char in enumerate(text):
+        if span_overlaps((index, index + 1), protected):
+            continue
         if char.isalpha():
             return f"{text[:index]}{char.lower()}{text[index + 1 :]}"
     return text
 
 
-def overhang_prompt(clean_prompt: str, index: int) -> str:
-    template = OVERHANG_TEMPLATES[index % len(OVERHANG_TEMPLATES)]
+def cursing_prompt(clean_prompt: str, index: int) -> str:
+    template = CURSING_TEMPLATES[index % len(CURSING_TEMPLATES)]
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
 
 
-def impatient_prompt(clean_prompt: str, index: int) -> str:
-    template = IMPATIENT_TEMPLATES[index % len(IMPATIENT_TEMPLATES)]
+def irrelevant_context_prompt(clean_prompt: str, index: int) -> str:
+    template = IRRELEVANT_CONTEXT_TEMPLATES[index % len(IRRELEVANT_CONTEXT_TEMPLATES)]
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
 
 
-def mobile_shorthand_prompt(clean_prompt: str, _index: int) -> str:
-    text = clean_prompt.lower()
-    triangle_area = re.search(
-        r"area of a triangle.*?base(?: of)? (?P<base>-?\d+(?:\.\d+)?).*?"
-        r"height(?: of)? (?P<height>-?\d+(?:\.\d+)?)",
-        text,
+def argumentative_prompt(clean_prompt: str, index: int) -> str:
+    template = ARGUMENTATIVE_TEMPLATES[index % len(ARGUMENTATIVE_TEMPLATES)]
+    return template.format(prompt=lowercase_first_alpha(clean_prompt))
+
+
+def quoted_literal_spans(text: str) -> list[tuple[int, int]]:
+    return [
+        match.span()
+        for match in re.finditer(r"(?<!\w)(['\"])(.*?)(?<!\\)\1(?!\w)", text)
+    ]
+
+
+def quoted_literals(text: str) -> list[str]:
+    return [
+        match.group(0)
+        for match in re.finditer(r"(?<!\w)(['\"])(.*?)(?<!\\)\1(?!\w)", text)
+    ]
+
+
+def span_overlaps(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
+    start, end = span
+    return any(
+        start < protected_end and end > protected_start
+        for protected_start, protected_end in spans
     )
-    if triangle_area:
-        return (
-            f"area triangle {triangle_area.group('base')} base "
-            f"height {triangle_area.group('height')}"
-        )
 
-    text = text.strip()
-    text = re.sub(r"[?!]+$", "", text)
-    text = re.sub(r"(?<!\d)\.$", "", text)
-    return " ".join(text.split())
+
+def literal_spans(text: str, literal: str) -> list[tuple[int, int]]:
+    if not literal:
+        return []
+    return [
+        match.span()
+        for match in re.finditer(re.escape(literal), text, flags=re.IGNORECASE)
+    ]
+
+
+def visible_gold_literal_spans(
+    text: str, example: dict[str, object]
+) -> list[tuple[int, int]]:
+    spans = []
+    for literal in primitive_gold_values(example["ground_truth"]):
+        if not isinstance(literal, str):
+            continue
+        literal_text = literal.strip()
+        if not literal_text:
+            continue
+        candidates = {literal_text, literal_text.replace("_", " ")}
+        for candidate in candidates:
+            spans.extend(literal_spans(text, candidate))
+    return spans
+
+
+def replace_first_unprotected_word(
+    text: str,
+    source: str,
+    replacement: str,
+    extra_protected: list[tuple[int, int]] | None = None,
+) -> str:
+    pattern = re.compile(rf"\b{re.escape(source)}\b", flags=re.IGNORECASE)
+    protected = quoted_literal_spans(text) + (extra_protected or [])
+    for match in pattern.finditer(text):
+        if span_overlaps(match.span(), protected):
+            continue
+        return f"{text[: match.start()]}{replacement}{text[match.end() :]}"
+    return text
+
+
+def typo_prompt(
+    clean_prompt: str,
+    index: int,
+    protected_spans: list[tuple[int, int]] | None = None,
+) -> str:
+    text = clean_prompt
+    start = index % len(TYPO_REPLACEMENTS)
+    replacements_applied = 0
+    for offset in range(len(TYPO_REPLACEMENTS)):
+        source, replacement = TYPO_REPLACEMENTS[(start + offset) % len(TYPO_REPLACEMENTS)]
+        updated = replace_first_unprotected_word(
+            text,
+            source,
+            replacement,
+            protected_spans,
+        )
+        if updated != text:
+            text = updated
+            replacements_applied += 1
+            if replacements_applied == 2:
+                return text
+    if replacements_applied:
+        return text
+    return f"plese {lowercase_first_alpha(text)}"
+
+
+def removed_spaces_prompt(clean_prompt: str, index: int) -> str:
+    pairs = list(re.finditer(r"\b[A-Za-z]{2,}\s+[A-Za-z]{2,}\b", clean_prompt))
+    protected = quoted_literal_spans(clean_prompt)
+    pairs = [match for match in pairs if not span_overlaps(match.span(), protected)]
+    if not pairs:
+        return clean_prompt
+    match = pairs[index % len(pairs)]
+    return (
+        clean_prompt[: match.start()]
+        + match.group(0).replace(" ", "", 1)
+        + clean_prompt[match.end() :]
+    )
 
 
 def transform_messages(question: object, index: int, transform: object) -> object:
@@ -609,6 +782,66 @@ def transform_messages(question: object, index: int, transform: object) -> objec
     first_message = conversations[0][0]
     first_message["content"] = transform(str(first_message["content"]), index)
     return conversations
+
+
+def numeric_tokens(text: str) -> list[str]:
+    return re.findall(r"(?<![A-Za-z0-9.])-?\d+(?:\.\d+)?(?![A-Za-z0-9.])", text)
+
+
+def primitive_gold_values(value: object) -> list[object]:
+    if isinstance(value, dict):
+        values: list[object] = []
+        for item in value.values():
+            values.extend(primitive_gold_values(item))
+        return values
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            values.extend(primitive_gold_values(item))
+        return values
+    if isinstance(value, (str, int, float, bool)):
+        return [value]
+    return []
+
+
+def literal_visible_in_text(literal: object, text: str) -> bool:
+    if isinstance(literal, bool):
+        return str(literal).lower() in text.lower()
+    if isinstance(literal, (int, float)):
+        return str(literal) in numeric_tokens(text)
+    literal_text = str(literal).strip()
+    if not literal_text:
+        return False
+    return compact_text(literal_text) in compact_text(text)
+
+
+def validate_augmented_prompt(
+    example: dict[str, object],
+    clean_prompt: str,
+    noisy_prompt: str,
+) -> list[str]:
+    reasons = []
+    clean_numbers = numeric_tokens(clean_prompt)
+    noisy_numbers = numeric_tokens(noisy_prompt)
+    if clean_numbers != noisy_numbers:
+        reasons.append(
+            f"numeric tokens changed from {clean_numbers!r} to {noisy_numbers!r}"
+        )
+
+    clean_quotes = quoted_literals(clean_prompt)
+    noisy_quotes = quoted_literals(noisy_prompt)
+    if clean_quotes != noisy_quotes:
+        reasons.append(
+            f"quoted literals changed from {clean_quotes!r} to {noisy_quotes!r}"
+        )
+
+    for literal in primitive_gold_values(example["ground_truth"]):
+        if literal_visible_in_text(literal, clean_prompt) and not literal_visible_in_text(
+            literal,
+            noisy_prompt,
+        ):
+            reasons.append(f"gold literal no longer visible in noisy prompt: {literal!r}")
+    return reasons
 
 
 def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
@@ -619,14 +852,47 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
         raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
 
     rows = []
-    for index, example in enumerate(read_jsonl(subset_path)):
+    examples = read_jsonl(subset_path)
+    limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
+    if limit is not None:
+        examples = examples[:limit]
+        print(f"Limiting augmentation to first {len(examples)} examples")
+
+    for index, example in enumerate(examples):
+        if dimension == "typos":
+            clean_prompt = conversation_text(example["question"])
+            protected = visible_gold_literal_spans(clean_prompt, example)
+
+            def protected_typo_prompt(
+                prompt: str,
+                prompt_index: int,
+                protected_spans: list[tuple[int, int]] = protected,
+            ) -> str:
+                return typo_prompt(prompt, prompt_index, protected_spans)
+
+            question = transform_messages(
+                example["question"],
+                index,
+                protected_typo_prompt,
+            )
+        else:
+            question = transform_messages(example["question"], index, transform)
+        clean_prompt = conversation_text(example["question"])
+        noisy_prompt = conversation_text(question)
+        validation_errors = validate_augmented_prompt(example, clean_prompt, noisy_prompt)
+        if validation_errors:
+            joined_errors = "; ".join(validation_errors)
+            raise RuntimeError(
+                f"{dimension} augmentation changed oracle-bearing text for "
+                f"{example['id']}: {joined_errors}"
+            )
         rows.append(
             {
                 "id": f"{example['id']}__{suffix}",
                 "base_id": example["id"],
                 "category": example["category"],
                 "dimension": dimension,
-                "question": transform_messages(example["question"], index, transform),
+                "question": question,
                 "function": example["function"],
                 "ground_truth": example["ground_truth"],
                 "oracle_preservation": {
@@ -640,16 +906,91 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
     print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
 
 
-def augment_overhang() -> None:
-    augment_dimension("conversational_overhang", "overhang", overhang_prompt)
+def augment_typos() -> None:
+    augment_dimension("typos", "typos", typo_prompt)
 
 
-def augment_mobile_shorthand() -> None:
-    augment_dimension("casual_mobile_shorthand", "mobile", mobile_shorthand_prompt)
+def augment_cursing() -> None:
+    augment_dimension("cursing", "cursing", cursing_prompt)
 
 
-def augment_impatient_tone() -> None:
-    augment_dimension("impatient_tone", "impatient", impatient_prompt)
+def augment_irrelevant_context() -> None:
+    augment_dimension("irrelevant_context", "context", irrelevant_context_prompt)
+
+
+def augment_removed_spaces() -> None:
+    augment_dimension("removed_spaces", "spaces", removed_spaces_prompt)
+
+
+def augment_argumentative() -> None:
+    augment_dimension("argumentative_challenge", "argue", argumentative_prompt)
+
+
+def prompt_text(example: dict[str, object]) -> str:
+    return conversation_text(example["question"])
+
+
+def review_augmentations() -> None:
+    clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    output_path = REPO_ROOT / "artifacts/generated/augmentation_review.csv"
+
+    if not clean_path.exists():
+        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
+
+    dimensions = (
+        ("typos", "aug_typo"),
+        ("cursing", "aug_cursing"),
+        ("irrelevant_context", "aug_irrelevant_context"),
+        ("removed_spaces", "aug_removed_spaces"),
+        ("argumentative_challenge", "aug_argumentative"),
+    )
+    generated_by_dimension = {}
+    for dimension, _column in dimensions:
+        path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
+        if not path.exists():
+            raise SystemExit(f"Missing {path.relative_to(REPO_ROOT)}. Run augment stages first.")
+        generated_by_dimension[dimension] = {
+            row["base_id"]: row for row in read_jsonl(path)
+        }
+
+    examples = read_jsonl(clean_path)
+    limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
+    if limit is not None:
+        examples = examples[:limit]
+        print(f"Limiting review CSV to first {len(examples)} examples")
+
+    fieldnames = [
+        "base_id",
+        "category",
+        "clean_prompt",
+        "aug_typo",
+        "aug_cursing",
+        "aug_irrelevant_context",
+        "aug_removed_spaces",
+        "aug_argumentative",
+        "function_names",
+        "ground_truth",
+    ]
+    rows = []
+    for example in examples:
+        row = {
+            "base_id": example["id"],
+            "category": example["category"],
+            "clean_prompt": prompt_text(example),
+            "function_names": ", ".join(function["name"] for function in example["function"]),
+            "ground_truth": json.dumps(example["ground_truth"], ensure_ascii=False),
+        }
+        for dimension, column in dimensions:
+            augmented = generated_by_dimension[dimension][example["id"]]
+            row[column] = prompt_text(augmented)
+        rows.append(row)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
 
 
 def accuracy_metrics(predictions: list[dict[str, object]]) -> dict[str, object]:
@@ -740,6 +1081,48 @@ def run_or_load_model_predictions(
     return rescored_predictions
 
 
+def load_current_clean_predictions(
+    clean_predictions_path: Path, base_ids: set[str]
+) -> dict[str, dict[str, object]]:
+    clean_subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    if not clean_subset_path.exists():
+        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
+
+    clean_examples = {
+        example["id"]: example
+        for example in read_jsonl(clean_subset_path)
+        if example["id"] in base_ids
+    }
+    missing_examples = sorted(base_ids - set(clean_examples))
+    if missing_examples:
+        raise SystemExit(f"Clean subset is missing paired base ids: {missing_examples[:10]}")
+
+    expected_fingerprints = {
+        example_id: input_fingerprint(example) for example_id, example in clean_examples.items()
+    }
+    clean_predictions = {
+        prediction["id"]: prediction for prediction in read_jsonl(clean_predictions_path)
+    }
+    missing_predictions = sorted(base_ids - set(clean_predictions))
+    stale_predictions = sorted(
+        prediction_id
+        for prediction_id in base_ids & set(clean_predictions)
+        if clean_predictions[prediction_id].get("input_fingerprint")
+        != expected_fingerprints[prediction_id]
+    )
+    if missing_predictions or stale_predictions:
+        details = []
+        if missing_predictions:
+            details.append(f"{len(missing_predictions)} missing")
+        if stale_predictions:
+            details.append(f"{len(stale_predictions)} stale")
+        raise SystemExit(
+            "Clean model predictions are not current for paired eval "
+            f"({', '.join(details)}). Run clean-baseline first."
+        )
+    return {prediction_id: clean_predictions[prediction_id] for prediction_id in base_ids}
+
+
 def run_openai_prediction(example: dict[str, object], api_key: str) -> dict[str, object]:
     response = call_openai_tool_router(example, api_key)
     calls = response_function_calls(response, tool_name_map(example))
@@ -778,6 +1161,9 @@ def freeze_bfcl() -> None:
                 "config_sha256": file_sha256(subset_config),
                 "categories": categories,
                 "max_examples": read_int_setting(subset_config, "max_examples"),
+                "examples_per_category": read_int_setting(
+                    subset_config, "examples_per_category"
+                ),
                 "materialized_path": "artifacts/frozen/clean_subset.jsonl",
                 "materialized_sha256": file_sha256(subset_path),
                 "materialized_total": len(read_jsonl(subset_path)),
@@ -943,9 +1329,10 @@ def paired_eval_dimension(dimension: str) -> dict[str, object]:
         raise SystemExit("Missing clean model predictions. Run clean-baseline first.")
 
     noisy_examples = read_jsonl(noisy_path)
-    clean_predictions = {
-        prediction["id"]: prediction for prediction in read_jsonl(clean_predictions_path)
-    }
+    clean_predictions = load_current_clean_predictions(
+        clean_predictions_path,
+        {str(noisy_example["base_id"]) for noisy_example in noisy_examples},
+    )
     noisy_predictions = run_or_load_model_predictions(noisy_examples, noisy_predictions_path)
     noisy_predictions_by_id = {prediction["id"]: prediction for prediction in noisy_predictions}
 
@@ -1098,6 +1485,153 @@ def count_by(rows: list[dict[str, object]], key: str) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def flat_values(value: object) -> list[object]:
+    if isinstance(value, dict):
+        values = []
+        for child in value.values():
+            values.extend(flat_values(child))
+        return values
+    if isinstance(value, list):
+        values = []
+        for child in value:
+            values.extend(flat_values(child))
+        return values
+    return [value]
+
+
+def compact_text(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value).lower())
+
+
+def parsed_json_value(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def gold_values(gold: object) -> list[str]:
+    values = []
+    for arguments in gold_arguments(gold):
+        values.extend(
+            str(value) for value in flat_values(arguments) if value not in ("", None)
+        )
+    return values
+
+
+def typo_copied_into_argument(
+    clean_prompt: str, noisy_prompt: str, noisy_prediction: object
+) -> bool:
+    clean_tokens = set(re.findall(r"[A-Za-z][A-Za-z']+", clean_prompt))
+    noisy_tokens = set(re.findall(r"[A-Za-z][A-Za-z']+", noisy_prompt))
+    introduced_tokens = {
+        token.lower() for token in noisy_tokens - clean_tokens if len(token) >= 4
+    }
+    argument_text = json.dumps(call_arguments(noisy_prediction)).lower()
+    return any(token in argument_text for token in introduced_tokens)
+
+
+def likely_alias_or_normalization_issue(gold: object, noisy_prediction: object) -> bool:
+    accepted_values = gold_values(gold)
+    noisy_values = [
+        str(value)
+        for arguments in call_arguments(noisy_prediction)
+        for value in flat_values(arguments)
+    ]
+    for noisy_value in noisy_values:
+        compact_noisy = compact_text(noisy_value)
+        if not compact_noisy:
+            continue
+        for accepted_value in accepted_values:
+            compact_accepted = compact_text(accepted_value)
+            if (
+                compact_accepted
+                and compact_accepted != compact_noisy
+                and (
+                    compact_accepted in compact_noisy
+                    or compact_noisy in compact_accepted
+                )
+            ):
+                return True
+    return False
+
+
+def regression_label(review: dict[str, object]) -> dict[str, str]:
+    gold = parsed_json_value(review["gold"])
+    noisy_prediction = parsed_json_value(review["noisy_prediction"])
+    heuristic = str(review["heuristic_error_type"])
+    noisy_names = call_names(noisy_prediction)
+    expected_names = gold_call_names(gold)
+    oracle_issue = "no"
+    augmentation_issue = "no"
+
+    if heuristic == "call_count_mismatch":
+        if len(noisy_names) < len(expected_names):
+            manual_error_type = "missing_tool_call"
+            notes = "Noisy prediction emits fewer calls than the gold oracle."
+        elif len(noisy_names) > len(expected_names):
+            manual_error_type = "extra_tool_call"
+            notes = "Noisy prediction emits more calls than the gold oracle."
+        else:
+            manual_error_type = "call_count_mismatch"
+            notes = "Noisy prediction call count differs from the gold oracle."
+    elif heuristic == "routing_error":
+        manual_error_type = "wrong_tool_routing"
+        notes = "Noisy prediction calls a different tool than the gold oracle."
+    elif heuristic == "argument_value_error":
+        if str(review["dimension"]) == "typos" and typo_copied_into_argument(
+            str(review["clean_prompt"]),
+            str(review["noisy_prompt"]),
+            noisy_prediction,
+        ):
+            manual_error_type = "typo_copied_into_argument_value"
+            augmentation_issue = "possible"
+            notes = "The typo appears to have been copied into an argument value."
+        elif likely_alias_or_normalization_issue(gold, noisy_prediction):
+            manual_error_type = "entity_or_alias_normalization_mismatch"
+            oracle_issue = "possible"
+            notes = (
+                "Noisy prediction appears semantically close but uses a different "
+                "alias or formatting than accepted gold."
+            )
+        else:
+            manual_error_type = "wrong_argument_value"
+            notes = (
+                "Noisy prediction uses the right tool and call count, but at least "
+                "one argument value differs."
+            )
+    elif heuristic == "argument_drop":
+        manual_error_type = "argument_drop"
+        notes = "Noisy prediction omits an argument required by the gold oracle."
+    elif heuristic == "argument_hallucination":
+        manual_error_type = "argument_hallucination"
+        notes = "Noisy prediction adds an argument not present in the gold oracle."
+    elif heuristic == "no_call":
+        manual_error_type = "no_tool_call"
+        notes = "Noisy prediction did not emit a tool call."
+    elif heuristic == "malformed_arguments":
+        manual_error_type = "malformed_call"
+        notes = "Noisy prediction emitted malformed tool-call arguments."
+    else:
+        manual_error_type = "other"
+        notes = "Needs manual inspection."
+
+    if str(review["dimension"]) == "argumentative_challenge":
+        notes += " The argumentative wrapper may have distracted call decomposition."
+    if str(review["dimension"]) == "removed_spaces":
+        notes += " Missing whitespace may have reduced parsing of slots or calls."
+
+    return {
+        "review_status": "labeled_v1",
+        "manual_error_type": manual_error_type,
+        "oracle_issue": oracle_issue,
+        "augmentation_issue": augmentation_issue,
+        "notes": notes,
+    }
+
+
 def analysis_review_row(
     row: dict[str, object],
     clean_examples: dict[str, dict[str, object]],
@@ -1241,6 +1775,141 @@ def analyze_dimension(dimension: str) -> dict[str, object]:
     }
 
 
+def flip_review_rows(dimension: str) -> list[dict[str, object]]:
+    paired_path = (
+        REPO_ROOT
+        / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
+    )
+    clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
+
+    paired_rows = read_jsonl(paired_path)
+    clean_examples = {row["id"]: row for row in read_jsonl(clean_path)}
+    noisy_examples = {row["id"]: row for row in read_jsonl(noisy_path)}
+    review_rows = []
+    for row in paired_rows:
+        if row["clean_correct"] and row["noisy_correct"]:
+            continue
+        if row["clean_correct"] and not row["noisy_correct"]:
+            outcome = "clean_success_noisy_failure"
+            include_noisy_error_type = True
+        elif not row["clean_correct"] and row["noisy_correct"]:
+            outcome = "clean_failure_noisy_success"
+            include_noisy_error_type = False
+        else:
+            outcome = "both_wrong"
+            include_noisy_error_type = True
+        review = analysis_review_row(
+            row,
+            clean_examples,
+            noisy_examples,
+            outcome,
+            include_noisy_error_type=include_noisy_error_type,
+        )
+        review_rows.append(
+            {
+                **review,
+                "clean_correct": row["clean_correct"],
+                "noisy_correct": row["noisy_correct"],
+                "gold": json.dumps(review["gold"], sort_keys=True),
+                "clean_prediction": json.dumps(
+                    review["clean_prediction"], sort_keys=True
+                ),
+                "noisy_prediction": json.dumps(
+                    review["noisy_prediction"], sort_keys=True
+                ),
+            }
+        )
+    return review_rows
+
+
+def regression_review_rows(flip_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows = []
+    for row in flip_rows:
+        if row["outcome"] != "clean_success_noisy_failure":
+            continue
+        label = regression_label(row)
+        rows.append(
+            {
+                **label,
+                "base_id": row["base_id"],
+                "noisy_id": row["noisy_id"],
+                "category": row["category"],
+                "dimension": row["dimension"],
+                "heuristic_error_type": row["heuristic_error_type"],
+                "clean_prompt": row["clean_prompt"],
+                "noisy_prompt": row["noisy_prompt"],
+                "gold": row["gold"],
+                "clean_prediction": row["clean_prediction"],
+                "noisy_prediction": row["noisy_prediction"],
+            }
+        )
+    return rows
+
+
+def benchmark_summary_rows(
+    dimensions: list[str],
+    regression_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows = []
+    for dimension in dimensions:
+        summary_path = (
+            REPO_ROOT
+            / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_summary.json"
+        )
+        paired_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        metrics = paired_summary["metrics"]
+        dimension_regressions = [
+            row for row in regression_rows if row["dimension"] == dimension
+        ]
+        possible_oracle_issues = [
+            row for row in dimension_regressions if row["oracle_issue"] == "possible"
+        ]
+        possible_augmentation_issues = [
+            row
+            for row in dimension_regressions
+            if row["augmentation_issue"] == "possible"
+        ]
+        adjusted_regression_count = (
+            int(metrics["clean_success_noisy_failure"]) - len(possible_oracle_issues)
+        )
+        clean_correct = int(metrics["clean_correct"])
+        rows.append(
+            {
+                "model": OPENAI_MODEL,
+                "dimension": dimension,
+                "total": metrics["total"],
+                "clean_accuracy": metrics["clean_accuracy"],
+                "noisy_accuracy": metrics["noisy_accuracy"],
+                "absolute_degradation": metrics["absolute_degradation"],
+                "clean_success_noisy_failure": metrics[
+                    "clean_success_noisy_failure"
+                ],
+                "conditional_failure_given_clean_success": metrics[
+                    "conditional_failure_given_clean_success"
+                ],
+                "raw_regression_count": metrics["clean_success_noisy_failure"],
+                "possible_oracle_issue_regressions": len(possible_oracle_issues),
+                "possible_augmentation_issue_regressions": len(
+                    possible_augmentation_issues
+                ),
+                "adjusted_regression_count": adjusted_regression_count,
+                "adjusted_regression_rate_given_clean_success": (
+                    adjusted_regression_count / clean_correct if clean_correct else 0.0
+                ),
+                "regressions_by_category": json.dumps(
+                    count_by(dimension_regressions, "category"),
+                    sort_keys=True,
+                ),
+                "regressions_by_manual_error_type": json.dumps(
+                    count_by(dimension_regressions, "manual_error_type"),
+                    sort_keys=True,
+                ),
+            }
+        )
+    return rows
+
+
 def analyze() -> None:
     dimensions = [
         dimension
@@ -1252,6 +1921,86 @@ def analyze() -> None:
     if not dimensions:
         raise SystemExit("No paired results found. Run paired-eval first.")
     summaries = [analyze_dimension(dimension) for dimension in dimensions]
+    flip_rows = []
+    for dimension in dimensions:
+        flip_rows.extend(flip_review_rows(dimension))
+    flip_review_path = REPO_ROOT / "artifacts/analysis/flip_review.csv"
+    regression_review_path = REPO_ROOT / "artifacts/analysis/regression_review.csv"
+    benchmark_summary_csv_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.csv"
+    benchmark_summary_json_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.json"
+    write_csv(
+        flip_review_path,
+        flip_rows,
+        [
+            "base_id",
+            "noisy_id",
+            "category",
+            "dimension",
+            "outcome",
+            "heuristic_error_type",
+            "clean_correct",
+            "noisy_correct",
+            "clean_prompt",
+            "noisy_prompt",
+            "gold",
+            "clean_prediction",
+            "noisy_prediction",
+        ],
+    )
+    regression_rows = regression_review_rows(flip_rows)
+    write_csv(
+        regression_review_path,
+        regression_rows,
+        [
+            "review_status",
+            "manual_error_type",
+            "oracle_issue",
+            "augmentation_issue",
+            "notes",
+            "base_id",
+            "noisy_id",
+            "category",
+            "dimension",
+            "heuristic_error_type",
+            "clean_prompt",
+            "noisy_prompt",
+            "gold",
+            "clean_prediction",
+            "noisy_prediction",
+        ],
+    )
+    benchmark_rows = benchmark_summary_rows(dimensions, regression_rows)
+    benchmark_fieldnames = [
+        "model",
+        "dimension",
+        "total",
+        "clean_accuracy",
+        "noisy_accuracy",
+        "absolute_degradation",
+        "clean_success_noisy_failure",
+        "conditional_failure_given_clean_success",
+        "raw_regression_count",
+        "possible_oracle_issue_regressions",
+        "possible_augmentation_issue_regressions",
+        "adjusted_regression_count",
+        "adjusted_regression_rate_given_clean_success",
+        "regressions_by_category",
+        "regressions_by_manual_error_type",
+    ]
+    write_csv(benchmark_summary_csv_path, benchmark_rows, benchmark_fieldnames)
+    write_json(
+        benchmark_summary_json_path,
+        {
+            "created_at": utc_now(),
+            "stage": "analyze",
+            "model": OPENAI_MODEL,
+            "adjusted_metric_rule": (
+                "adjusted_regression_count excludes only rows with "
+                "oracle_issue=possible"
+            ),
+            "dimensions": benchmark_rows,
+        },
+    )
     write_json(
         REPO_ROOT / "artifacts/analysis/summary.json",
         {
@@ -1259,8 +2008,22 @@ def analyze() -> None:
             "stage": "analyze",
             "model": OPENAI_MODEL,
             "dimensions": summaries,
+            "benchmark_summary_csv": benchmark_summary_csv_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
+            "benchmark_summary_json": benchmark_summary_json_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
+            "flip_review_csv": flip_review_path.relative_to(REPO_ROOT).as_posix(),
+            "regression_review_csv": regression_review_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
         },
     )
+    print(f"Wrote {benchmark_summary_csv_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {benchmark_summary_json_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {regression_review_path.relative_to(REPO_ROOT)}")
 
 
 def run_stage(stage: Stage, dry_run: bool) -> None:
@@ -1273,14 +2036,23 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
     if stage.name == "clean-baseline":
         clean_baseline()
         return
-    if stage.name == "augment-overhang":
-        augment_overhang()
+    if stage.name == "augment-typos":
+        augment_typos()
         return
-    if stage.name == "augment-mobile-shorthand":
-        augment_mobile_shorthand()
+    if stage.name == "augment-cursing":
+        augment_cursing()
         return
-    if stage.name == "augment-impatient-tone":
-        augment_impatient_tone()
+    if stage.name == "augment-irrelevant-context":
+        augment_irrelevant_context()
+        return
+    if stage.name == "augment-removed-spaces":
+        augment_removed_spaces()
+        return
+    if stage.name == "augment-argumentative":
+        augment_argumentative()
+        return
+    if stage.name == "review-augmentations":
+        review_augmentations()
         return
     if stage.name == "paired-eval":
         paired_eval()

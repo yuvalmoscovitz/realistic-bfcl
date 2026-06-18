@@ -1,4 +1,4 @@
-.PHONY: status lint freeze-bfcl clean-baseline augment-overhang augment-incremental verify-noisy paired-eval analyze defenses
+.PHONY: status lint freeze-bfcl clean-baseline augment-typos augment-cursing augment-irrelevant-context augment-removed-spaces augment-argumentative review-augmentations verify-noisy paired-eval analyze defenses
 
 PYTHON ?= python
 RUN_STAGE = $(PYTHON) scripts/run_stage.py
@@ -15,11 +15,23 @@ freeze-bfcl:
 clean-baseline:
 	$(RUN_STAGE) clean-baseline
 
-augment-overhang:
-	$(RUN_STAGE) augment-overhang
+augment-typos:
+	$(RUN_STAGE) augment-typos
 
-augment-incremental:
-	$(RUN_STAGE) augment-incremental
+augment-cursing:
+	$(RUN_STAGE) augment-cursing
+
+augment-irrelevant-context:
+	$(RUN_STAGE) augment-irrelevant-context
+
+augment-removed-spaces:
+	$(RUN_STAGE) augment-removed-spaces
+
+augment-argumentative:
+	$(RUN_STAGE) augment-argumentative
+
+review-augmentations:
+	$(RUN_STAGE) review-augmentations
 
 verify-noisy:
 	$(RUN_STAGE) verify-noisy

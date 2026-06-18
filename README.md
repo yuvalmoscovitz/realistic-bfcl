@@ -56,8 +56,12 @@ make status
 make lint
 make freeze-bfcl
 make clean-baseline
-make augment-overhang
-make augment-incremental
+make augment-typos
+make augment-cursing
+make augment-irrelevant-context
+make augment-removed-spaces
+make augment-argumentative
+make review-augmentations
 make verify-noisy
 make paired-eval
 make analyze
@@ -89,9 +93,12 @@ through `OPENAI_API_KEY`, `REALISTIC_BFCL_ENV_FILE=/path/to/.env`, or a sibling
 
 1. Pin BFCL dataset commit, evaluator version, model list, and clean subset.
 2. Reproduce clean BFCL-style scores on the selected subset.
-3. Implement two high-realism transformations:
-   - conversational overhang
-   - incremental slot revelation
+3. Implement five high-realism transformations:
+   - typos
+   - cursing
+   - irrelevant context
+   - removed spaces
+   - argumentative challenge
 4. Add automatic invariant checks for oracle preservation.
 5. Run paired clean-vs-noisy evaluation and report degradation.
 
