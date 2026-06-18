@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from .analyze import analyze
 from .augment import augment
 from .evaluate import freeze_bfcl, run_bfcl
+from .llm_augment import augment_llm_pilot
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,22 @@ STAGES: tuple[Stage, ...] = (
             "artifacts/generated/augmentation_review.csv",
         ),
         next_action="Run BFCL clean/noisy paired evaluation on the frozen dataset.",
+    ),
+    Stage(
+        name="augment-llm-pilot",
+        purpose="Generate saved LLM-based realistic augmentations for a small review pilot.",
+        inputs=("artifacts/frozen/clean_subset.jsonl",),
+        outputs=(
+            "artifacts/generated/llm_work_context.jsonl",
+            "artifacts/generated/llm_prior_thread.jsonl",
+            "artifacts/generated/llm_conversation_history.jsonl",
+            "artifacts/generated/llm_work_context_review.csv",
+            "artifacts/generated/llm_prior_thread_review.csv",
+            "artifacts/generated/llm_conversation_history_review.csv",
+        ),
+        next_action=(
+            "Review accepted rows, then run paired evaluation for the LLM pilot dimensions."
+        ),
     ),
     Stage(
         name="run-bfcl",
@@ -104,6 +121,9 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         return
     if stage.name == "augment":
         augment()
+        return
+    if stage.name == "augment-llm-pilot":
+        augment_llm_pilot()
         return
     if stage.name == "run-bfcl":
         run_bfcl()
