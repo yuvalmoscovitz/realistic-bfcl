@@ -65,10 +65,15 @@ DISTRACTOR_SANDWICH_TEMPLATES = (
     "my laptop is acting up and the meeting was a waste. {prompt} that's the only thing i need.",
     "the weather is horrible. {prompt} nothing else.",
     "the thread above is unrelated and i'm annoyed. {prompt} you are my only source of joy today",
-    "i have too many tabs open and none of them helping. {prompt}!!!",
+    "i have 3 tabs open and none of them helping. {prompt}!!!",
     "my notes are messy and the old task is irrelevant now. {prompt} please please",
     "this man acted so weird. {prompt} he is still here btw",
 )
+VERBATIM_WRAPPER_DIMENSIONS = {
+    "profane_sandwich",
+    "argumentative_sandwich",
+    "distractor_sandwich",
+}
 
 TYPO_REPLACEMENTS = (
     ("what", "wat"),
@@ -268,23 +273,35 @@ def validate_augmented_prompt(
     example: dict[str, object],
     clean_prompt: str,
     noisy_prompt: str,
+    allow_verbatim_wrapper_noise: bool = False,
 ) -> list[str]:
     reasons = []
-    clean_numbers = numeric_tokens(clean_prompt)
-    noisy_numbers = numeric_tokens(noisy_prompt)
-    if clean_numbers != noisy_numbers:
-        reasons.append(f"numeric tokens changed from {clean_numbers!r} to {noisy_numbers!r}")
+    if allow_verbatim_wrapper_noise:
+        for number in numeric_tokens(clean_prompt):
+            if number not in noisy_prompt:
+                reasons.append(f"clean numeric token missing from noisy prompt: {number!r}")
+        for quoted in quoted_literals(clean_prompt):
+            if quoted not in noisy_prompt:
+                reasons.append(f"clean quoted literal missing from noisy prompt: {quoted!r}")
+    else:
+        clean_numbers = numeric_tokens(clean_prompt)
+        noisy_numbers = numeric_tokens(noisy_prompt)
+        if clean_numbers != noisy_numbers:
+            reasons.append(f"numeric tokens changed from {clean_numbers!r} to {noisy_numbers!r}")
 
-    clean_quotes = quoted_literals(clean_prompt)
-    noisy_quotes = quoted_literals(noisy_prompt)
-    if clean_quotes != noisy_quotes:
-        reasons.append(f"quoted literals changed from {clean_quotes!r} to {noisy_quotes!r}")
+        clean_quotes = quoted_literals(clean_prompt)
+        noisy_quotes = quoted_literals(noisy_prompt)
+        if clean_quotes != noisy_quotes:
+            reasons.append(f"quoted literals changed from {clean_quotes!r} to {noisy_quotes!r}")
 
     for literal in primitive_gold_values(example["ground_truth"]):
-        if literal_visible_in_text(literal, clean_prompt) and not literal_visible_in_text(
-            literal,
-            noisy_prompt,
-        ):
+        if not literal_visible_in_text(literal, clean_prompt):
+            continue
+        if allow_verbatim_wrapper_noise:
+            noisy_contains_literal = compact_text(str(literal)) in compact_text(noisy_prompt)
+        else:
+            noisy_contains_literal = literal_visible_in_text(literal, noisy_prompt)
+        if not noisy_contains_literal:
             reasons.append(f"gold literal no longer visible in noisy prompt: {literal!r}")
     return reasons
 
@@ -324,7 +341,12 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
             question = transform_messages(example["question"], index, transform)
         clean_prompt = conversation_text(example["question"])
         noisy_prompt = conversation_text(question)
-        validation_errors = validate_augmented_prompt(example, clean_prompt, noisy_prompt)
+        validation_errors = validate_augmented_prompt(
+            example,
+            clean_prompt,
+            noisy_prompt,
+            allow_verbatim_wrapper_noise=dimension in VERBATIM_WRAPPER_DIMENSIONS,
+        )
         if validation_errors:
             joined_errors = "; ".join(validation_errors)
             raise RuntimeError(
