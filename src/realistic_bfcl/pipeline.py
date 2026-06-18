@@ -43,9 +43,21 @@ INCREMENTAL_GENERATOR_SYSTEM_INSTRUCTION = (
 INCREMENTAL_GENERATOR_USER_INSTRUCTION = (
     "Split this single user request into 2 to 5 natural user turns where "
     "the user reveals the intent and slots gradually. Use casual realistic "
-    "phrasing, but preserve all required literals and slot values exactly."
+    "phrasing, preserve all required literals and slot values exactly, and "
+    "do not introduce new facts. Copy decimal values exactly; do not round, "
+    "truncate, or rewrite numeric values. Write only user messages; do not "
+    "use assistant-like acknowledgements such as 'sure', 'great', or 'okay' "
+    "at the start of a turn. Do not append required values as standalone "
+    "fragments after an otherwise complete sentence. Do not mention tool, "
+    "function, API, or library names unless the clean request already did."
 )
-INCREMENTAL_VALIDATION_VERSION = "oracle_literal_groups_v8"
+INCREMENTAL_VALIDATION_VERSION = "oracle_literal_groups_v13"
+NUMERIC_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9.])-?\d+(?:\.\d+)?(?![A-Za-z0-9])"
+)
+STANDALONE_TRAILING_NUMBER_PATTERN = re.compile(
+    r"[.!?]\s+-?\d+(?:\.\d+)?\s*$"
+)
 RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
 BFCL_CATEGORY_FILES = {
     "simple_python": (
@@ -324,6 +336,19 @@ def openai_concurrency() -> int:
     if concurrency < 1:
         raise SystemExit("REALISTIC_BFCL_CONCURRENCY must be >= 1.")
     return concurrency
+
+
+def optional_positive_int_env(name: str) -> int | None:
+    value = os.environ.get(name)
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise SystemExit(f"{name} must be an integer.") from error
+    if parsed < 1:
+        raise SystemExit(f"{name} must be >= 1.")
+    return parsed
 
 
 def utc_now() -> str:
@@ -747,7 +772,7 @@ def literal_requirements(text: str) -> list[str]:
     ]
     literals.extend(re.findall(r"\[[^\]]+\]", text))
     literals.extend(re.findall(r"\b[A-Za-z]:/[^\s,;?]+", text))
-    literals.extend(re.findall(r"-?\d+(?:\.\d+)?(?:%|[a-zA-Z]+)?(?!\))", text))
+    literals.extend(numeric_token_strings(text))
     return [literal.strip().strip(".,;:?!") for literal in literals if literal.strip()]
 
 
@@ -776,6 +801,7 @@ def literal_present(literal: str, joined: str, normalized_joined: str) -> bool:
             match_number = numeric_value(match)
             if match_number == literal_number:
                 return True
+        return False
     if re.fullmatch(r"[A-Za-z]{1,3}", literal):
         return bool(re.search(rf"\b{re.escape(literal.lower())}\b", joined))
     return literal.lower() in joined or normalize_requirement_text(literal) in normalized_joined
@@ -791,6 +817,25 @@ def primitive_literal(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def numeric_literals(text: str) -> list[float]:
+    values = []
+    for match in numeric_token_strings(text):
+        value = numeric_value(match)
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def numeric_token_strings(text: str) -> list[str]:
+    tokens = []
+    for match in NUMERIC_TOKEN_PATTERN.finditer(text):
+        line_prefix = text[: match.start()].rsplit("\n", 1)[-1]
+        if match.end() < len(text) and text[match.end()] == ")" and not line_prefix.strip():
+            continue
+        tokens.append(match.group(0))
+    return tokens
 
 
 def oracle_literal_groups(value: object, sequence_required: bool = False) -> list[list[str]]:
@@ -822,6 +867,37 @@ def oracle_literal_groups(value: object, sequence_required: bool = False) -> lis
     return [[literal]] if literal else []
 
 
+def function_required_parameters(example: dict[str, object]) -> dict[str, set[str]]:
+    required_by_function = {}
+    for function_doc in example["function"]:
+        parameters = function_doc.get("parameters", {})
+        if not isinstance(parameters, dict):
+            continue
+        required = parameters.get("required", [])
+        if not isinstance(required, list):
+            required = []
+        required_by_function[str(function_doc["name"])] = {str(name) for name in required}
+    return required_by_function
+
+
+def required_oracle_literals(example: dict[str, object]) -> list[str]:
+    required_by_function = function_required_parameters(example)
+    literals = []
+    for call in example["ground_truth"]:
+        if not isinstance(call, dict):
+            continue
+        for function_name, arguments in call.items():
+            if not isinstance(arguments, dict):
+                continue
+            required_parameters = required_by_function.get(str(function_name), set())
+            for argument_name, value in arguments.items():
+                if str(argument_name) not in required_parameters:
+                    continue
+                for group in oracle_literal_groups(value):
+                    literals.extend(group)
+    return literals
+
+
 def validation_requirement_groups(example: dict[str, object]) -> list[list[str]]:
     clean_text = clean_prompt(example).lower()
     normalized_clean_text = normalize_requirement_text(clean_text)
@@ -841,6 +917,39 @@ def validation_requirement_groups(example: dict[str, object]) -> list[list[str]]
     return deduped
 
 
+def allowed_numeric_values(example: dict[str, object]) -> set[float]:
+    allowed = set(numeric_literals(clean_prompt(example)))
+    for literal in required_oracle_literals(example):
+        value = numeric_value(literal)
+        if value is not None:
+            allowed.add(value)
+    return allowed
+
+
+def unexpected_numeric_literals(example: dict[str, object], turns: list[str]) -> list[str]:
+    allowed = allowed_numeric_values(example)
+    unexpected = []
+    for turn in turns:
+        for match in numeric_token_strings(turn):
+            value = numeric_value(match)
+            if value is not None and value not in allowed:
+                unexpected.append(match)
+    return sorted(set(unexpected), key=lambda item: (numeric_value(item), item))
+
+
+def unexpected_function_name_mentions(
+    example: dict[str, object], turns: list[str]
+) -> list[str]:
+    clean_text = clean_prompt(example).lower()
+    generated_text = " ".join(turn.lower() for turn in turns)
+    unexpected = []
+    for function_doc in example["function"]:
+        function_name = str(function_doc["name"]).lower()
+        if function_name in generated_text and function_name not in clean_text:
+            unexpected.append(function_name)
+    return sorted(set(unexpected))
+
+
 def validate_incremental_turns(
     example: dict[str, object], turns: object
 ) -> tuple[bool, list[str]]:
@@ -851,6 +960,13 @@ def validate_incremental_turns(
         reasons.append("turn count must be between 2 and 5")
     if any(not isinstance(turn, str) or not turn.strip() for turn in turns):
         reasons.append("all turns must be non-empty strings")
+    if reasons:
+        return False, reasons
+
+    for turn in turns:
+        if STANDALONE_TRAILING_NUMBER_PATTERN.search(turn.strip()):
+            reasons.append("standalone numeric fragment after sentence")
+            break
 
     joined = " ".join(str(turn).lower() for turn in turns)
     normalized_joined = normalize_requirement_text(joined)
@@ -859,14 +975,22 @@ def validate_incremental_turns(
             reasons.append("missing literal: " + " or ".join(group))
             if len(reasons) >= 6:
                 break
+    for literal in unexpected_numeric_literals(example, turns):
+        reasons.append(f"unexpected numeric literal: {literal}")
+        if len(reasons) >= 6:
+            break
+    for function_name in unexpected_function_name_mentions(example, turns):
+        reasons.append(f"unexpected function name mention: {function_name}")
+        if len(reasons) >= 6:
+            break
     return not reasons, reasons
 
 
 def incremental_generator_payload(
     example: dict[str, object], repair_reasons: list[str] | None = None
 ) -> dict[str, object]:
-    function_names = [function_doc["name"] for function_doc in example["function"]]
     requirement_groups = validation_requirement_groups(example)
+    allowed_numbers = sorted(allowed_numeric_values(example))
     repair_text = ""
     if repair_reasons:
         repair_text = (
@@ -885,11 +1009,13 @@ def incremental_generator_payload(
                 "role": "user",
                 "content": (
                     f"{INCREMENTAL_GENERATOR_USER_INSTRUCTION}\n\n"
-                    f"Function names available: {json.dumps(function_names)}\n"
                     f"Clean request: {clean_prompt(example)}\n\n"
                     "Required literals or accepted alternatives that must appear in the "
                     "combined turns:\n"
                     f"{json.dumps(requirement_groups, ensure_ascii=True)}\n\n"
+                    "Allowed numeric values in the combined turns; do not use any other "
+                    "digits or numeric values:\n"
+                    f"{json.dumps(allowed_numbers)}\n\n"
                     "Return JSON with this shape:\n"
                     "{\"turns\":[\"...\",\"...\"],\"strategy\":\"llm_slot_revelation\"}"
                     f"{repair_text}"
@@ -905,6 +1031,8 @@ def call_incremental_generator(
 ) -> dict[str, object]:
     response = openai_retry_json(incremental_generator_payload(example, repair_reasons), api_key)
     parsed = json_from_text(response_text(response))
+    if not isinstance(parsed, dict):
+        raise ValueError("Generator response JSON must be an object.")
     turns = parsed.get("turns")
     valid, reasons = validate_incremental_turns(example, turns)
     return {
@@ -956,6 +1084,10 @@ def augment_incremental() -> None:
         raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
 
     examples = read_jsonl(subset_path)
+    limit = optional_positive_int_env("REALISTIC_BFCL_INCREMENTAL_LIMIT")
+    if limit is not None:
+        examples = examples[:limit]
+        print(f"Limiting incremental generation to first {len(examples)} examples")
     examples_by_id = {example["id"]: example for example in examples}
     expected_fingerprints = {
         example["id"]: generation_fingerprint(example) for example in examples
