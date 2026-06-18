@@ -149,8 +149,15 @@ STAGES: tuple[Stage, ...] = (
         name="analyze",
         purpose="Compute degradation metrics and error taxonomy.",
         inputs=("artifacts/results/paired/",),
-        outputs=("artifacts/analysis/metrics.json", "artifacts/analysis/error_taxonomy.csv"),
-        next_action="Implement paired metrics and classify noisy failures.",
+        outputs=(
+            "artifacts/analysis/benchmark_summary.csv",
+            "artifacts/analysis/benchmark_summary.json",
+            "artifacts/analysis/flip_review.csv",
+            "artifacts/analysis/regression_review.csv",
+        ),
+        next_action=(
+            "Use adjusted regression metrics to decide whether the pilot is ready to scale."
+        ),
     ),
     Stage(
         name="defenses",
@@ -644,7 +651,10 @@ TYPO_REPLACEMENTS = (
 
 
 def lowercase_first_alpha(text: str) -> str:
+    protected = quoted_literal_spans(text)
     for index, char in enumerate(text):
+        if span_overlaps((index, index + 1), protected):
+            continue
         if char.isalpha():
             return f"{text[:index]}{char.lower()}{text[index + 1 :]}"
     return text
@@ -665,13 +675,84 @@ def argumentative_prompt(clean_prompt: str, index: int) -> str:
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
 
 
-def typo_prompt(clean_prompt: str, index: int) -> str:
+def quoted_literal_spans(text: str) -> list[tuple[int, int]]:
+    return [
+        match.span()
+        for match in re.finditer(r"(?<!\w)(['\"])(.*?)(?<!\\)\1(?!\w)", text)
+    ]
+
+
+def quoted_literals(text: str) -> list[str]:
+    return [
+        match.group(0)
+        for match in re.finditer(r"(?<!\w)(['\"])(.*?)(?<!\\)\1(?!\w)", text)
+    ]
+
+
+def span_overlaps(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
+    start, end = span
+    return any(
+        start < protected_end and end > protected_start
+        for protected_start, protected_end in spans
+    )
+
+
+def literal_spans(text: str, literal: str) -> list[tuple[int, int]]:
+    if not literal:
+        return []
+    return [
+        match.span()
+        for match in re.finditer(re.escape(literal), text, flags=re.IGNORECASE)
+    ]
+
+
+def visible_gold_literal_spans(
+    text: str, example: dict[str, object]
+) -> list[tuple[int, int]]:
+    spans = []
+    for literal in primitive_gold_values(example["ground_truth"]):
+        if not isinstance(literal, str):
+            continue
+        literal_text = literal.strip()
+        if not literal_text:
+            continue
+        candidates = {literal_text, literal_text.replace("_", " ")}
+        for candidate in candidates:
+            spans.extend(literal_spans(text, candidate))
+    return spans
+
+
+def replace_first_unprotected_word(
+    text: str,
+    source: str,
+    replacement: str,
+    extra_protected: list[tuple[int, int]] | None = None,
+) -> str:
+    pattern = re.compile(rf"\b{re.escape(source)}\b", flags=re.IGNORECASE)
+    protected = quoted_literal_spans(text) + (extra_protected or [])
+    for match in pattern.finditer(text):
+        if span_overlaps(match.span(), protected):
+            continue
+        return f"{text[: match.start()]}{replacement}{text[match.end() :]}"
+    return text
+
+
+def typo_prompt(
+    clean_prompt: str,
+    index: int,
+    protected_spans: list[tuple[int, int]] | None = None,
+) -> str:
     text = clean_prompt
     start = index % len(TYPO_REPLACEMENTS)
     replacements_applied = 0
     for offset in range(len(TYPO_REPLACEMENTS)):
         source, replacement = TYPO_REPLACEMENTS[(start + offset) % len(TYPO_REPLACEMENTS)]
-        updated = re.sub(rf"\b{source}\b", replacement, text, count=1, flags=re.IGNORECASE)
+        updated = replace_first_unprotected_word(
+            text,
+            source,
+            replacement,
+            protected_spans,
+        )
         if updated != text:
             text = updated
             replacements_applied += 1
@@ -679,18 +760,13 @@ def typo_prompt(clean_prompt: str, index: int) -> str:
                 return text
     if replacements_applied:
         return text
-    words = text.split()
-    for word_index, word in enumerate(words):
-        if len(word.strip(".,?!")) > 5:
-            stripped = word.strip(".,?!")
-            typo = stripped[:2] + stripped[3] + stripped[2] + stripped[4:]
-            words[word_index] = word.replace(stripped, typo)
-            return " ".join(words)
-    return text
+    return f"plese {lowercase_first_alpha(text)}"
 
 
 def removed_spaces_prompt(clean_prompt: str, index: int) -> str:
     pairs = list(re.finditer(r"\b[A-Za-z]{2,}\s+[A-Za-z]{2,}\b", clean_prompt))
+    protected = quoted_literal_spans(clean_prompt)
+    pairs = [match for match in pairs if not span_overlaps(match.span(), protected)]
     if not pairs:
         return clean_prompt
     match = pairs[index % len(pairs)]
@@ -708,6 +784,66 @@ def transform_messages(question: object, index: int, transform: object) -> objec
     return conversations
 
 
+def numeric_tokens(text: str) -> list[str]:
+    return re.findall(r"(?<![A-Za-z0-9.])-?\d+(?:\.\d+)?(?![A-Za-z0-9.])", text)
+
+
+def primitive_gold_values(value: object) -> list[object]:
+    if isinstance(value, dict):
+        values: list[object] = []
+        for item in value.values():
+            values.extend(primitive_gold_values(item))
+        return values
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            values.extend(primitive_gold_values(item))
+        return values
+    if isinstance(value, (str, int, float, bool)):
+        return [value]
+    return []
+
+
+def literal_visible_in_text(literal: object, text: str) -> bool:
+    if isinstance(literal, bool):
+        return str(literal).lower() in text.lower()
+    if isinstance(literal, (int, float)):
+        return str(literal) in numeric_tokens(text)
+    literal_text = str(literal).strip()
+    if not literal_text:
+        return False
+    return compact_text(literal_text) in compact_text(text)
+
+
+def validate_augmented_prompt(
+    example: dict[str, object],
+    clean_prompt: str,
+    noisy_prompt: str,
+) -> list[str]:
+    reasons = []
+    clean_numbers = numeric_tokens(clean_prompt)
+    noisy_numbers = numeric_tokens(noisy_prompt)
+    if clean_numbers != noisy_numbers:
+        reasons.append(
+            f"numeric tokens changed from {clean_numbers!r} to {noisy_numbers!r}"
+        )
+
+    clean_quotes = quoted_literals(clean_prompt)
+    noisy_quotes = quoted_literals(noisy_prompt)
+    if clean_quotes != noisy_quotes:
+        reasons.append(
+            f"quoted literals changed from {clean_quotes!r} to {noisy_quotes!r}"
+        )
+
+    for literal in primitive_gold_values(example["ground_truth"]):
+        if literal_visible_in_text(literal, clean_prompt) and not literal_visible_in_text(
+            literal,
+            noisy_prompt,
+        ):
+            reasons.append(f"gold literal no longer visible in noisy prompt: {literal!r}")
+    return reasons
+
+
 def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
     subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     output_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
@@ -723,13 +859,40 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
         print(f"Limiting augmentation to first {len(examples)} examples")
 
     for index, example in enumerate(examples):
+        if dimension == "typos":
+            clean_prompt = conversation_text(example["question"])
+            protected = visible_gold_literal_spans(clean_prompt, example)
+
+            def protected_typo_prompt(
+                prompt: str,
+                prompt_index: int,
+                protected_spans: list[tuple[int, int]] = protected,
+            ) -> str:
+                return typo_prompt(prompt, prompt_index, protected_spans)
+
+            question = transform_messages(
+                example["question"],
+                index,
+                protected_typo_prompt,
+            )
+        else:
+            question = transform_messages(example["question"], index, transform)
+        clean_prompt = conversation_text(example["question"])
+        noisy_prompt = conversation_text(question)
+        validation_errors = validate_augmented_prompt(example, clean_prompt, noisy_prompt)
+        if validation_errors:
+            joined_errors = "; ".join(validation_errors)
+            raise RuntimeError(
+                f"{dimension} augmentation changed oracle-bearing text for "
+                f"{example['id']}: {joined_errors}"
+            )
         rows.append(
             {
                 "id": f"{example['id']}__{suffix}",
                 "base_id": example["id"],
                 "category": example["category"],
                 "dimension": dimension,
-                "question": transform_messages(example["question"], index, transform),
+                "question": question,
                 "function": example["function"],
                 "ground_truth": example["ground_truth"],
                 "oracle_preservation": {
@@ -1684,6 +1847,69 @@ def regression_review_rows(flip_rows: list[dict[str, object]]) -> list[dict[str,
     return rows
 
 
+def benchmark_summary_rows(
+    dimensions: list[str],
+    regression_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows = []
+    for dimension in dimensions:
+        summary_path = (
+            REPO_ROOT
+            / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_summary.json"
+        )
+        paired_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        metrics = paired_summary["metrics"]
+        dimension_regressions = [
+            row for row in regression_rows if row["dimension"] == dimension
+        ]
+        possible_oracle_issues = [
+            row for row in dimension_regressions if row["oracle_issue"] == "possible"
+        ]
+        possible_augmentation_issues = [
+            row
+            for row in dimension_regressions
+            if row["augmentation_issue"] == "possible"
+        ]
+        adjusted_regression_count = (
+            int(metrics["clean_success_noisy_failure"]) - len(possible_oracle_issues)
+        )
+        clean_correct = int(metrics["clean_correct"])
+        rows.append(
+            {
+                "model": OPENAI_MODEL,
+                "dimension": dimension,
+                "total": metrics["total"],
+                "clean_accuracy": metrics["clean_accuracy"],
+                "noisy_accuracy": metrics["noisy_accuracy"],
+                "absolute_degradation": metrics["absolute_degradation"],
+                "clean_success_noisy_failure": metrics[
+                    "clean_success_noisy_failure"
+                ],
+                "conditional_failure_given_clean_success": metrics[
+                    "conditional_failure_given_clean_success"
+                ],
+                "raw_regression_count": metrics["clean_success_noisy_failure"],
+                "possible_oracle_issue_regressions": len(possible_oracle_issues),
+                "possible_augmentation_issue_regressions": len(
+                    possible_augmentation_issues
+                ),
+                "adjusted_regression_count": adjusted_regression_count,
+                "adjusted_regression_rate_given_clean_success": (
+                    adjusted_regression_count / clean_correct if clean_correct else 0.0
+                ),
+                "regressions_by_category": json.dumps(
+                    count_by(dimension_regressions, "category"),
+                    sort_keys=True,
+                ),
+                "regressions_by_manual_error_type": json.dumps(
+                    count_by(dimension_regressions, "manual_error_type"),
+                    sort_keys=True,
+                ),
+            }
+        )
+    return rows
+
+
 def analyze() -> None:
     dimensions = [
         dimension
@@ -1700,6 +1926,8 @@ def analyze() -> None:
         flip_rows.extend(flip_review_rows(dimension))
     flip_review_path = REPO_ROOT / "artifacts/analysis/flip_review.csv"
     regression_review_path = REPO_ROOT / "artifacts/analysis/regression_review.csv"
+    benchmark_summary_csv_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.csv"
+    benchmark_summary_json_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.json"
     write_csv(
         flip_review_path,
         flip_rows,
@@ -1741,6 +1969,38 @@ def analyze() -> None:
             "noisy_prediction",
         ],
     )
+    benchmark_rows = benchmark_summary_rows(dimensions, regression_rows)
+    benchmark_fieldnames = [
+        "model",
+        "dimension",
+        "total",
+        "clean_accuracy",
+        "noisy_accuracy",
+        "absolute_degradation",
+        "clean_success_noisy_failure",
+        "conditional_failure_given_clean_success",
+        "raw_regression_count",
+        "possible_oracle_issue_regressions",
+        "possible_augmentation_issue_regressions",
+        "adjusted_regression_count",
+        "adjusted_regression_rate_given_clean_success",
+        "regressions_by_category",
+        "regressions_by_manual_error_type",
+    ]
+    write_csv(benchmark_summary_csv_path, benchmark_rows, benchmark_fieldnames)
+    write_json(
+        benchmark_summary_json_path,
+        {
+            "created_at": utc_now(),
+            "stage": "analyze",
+            "model": OPENAI_MODEL,
+            "adjusted_metric_rule": (
+                "adjusted_regression_count excludes only rows with "
+                "oracle_issue=possible"
+            ),
+            "dimensions": benchmark_rows,
+        },
+    )
     write_json(
         REPO_ROOT / "artifacts/analysis/summary.json",
         {
@@ -1748,12 +2008,20 @@ def analyze() -> None:
             "stage": "analyze",
             "model": OPENAI_MODEL,
             "dimensions": summaries,
+            "benchmark_summary_csv": benchmark_summary_csv_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
+            "benchmark_summary_json": benchmark_summary_json_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
             "flip_review_csv": flip_review_path.relative_to(REPO_ROOT).as_posix(),
             "regression_review_csv": regression_review_path.relative_to(
                 REPO_ROOT
             ).as_posix(),
         },
     )
+    print(f"Wrote {benchmark_summary_csv_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {benchmark_summary_json_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {regression_review_path.relative_to(REPO_ROOT)}")
 
