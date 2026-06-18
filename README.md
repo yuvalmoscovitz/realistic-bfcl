@@ -34,6 +34,7 @@ configs/
   realism_dimensions.yaml      Current realism dimensions and limits.
   subsets/smoke.yaml           Current stratified clean subset definition.
 docs/
+  paper_flow.md                Compact paper/story structure for the benchmark.
   research_pipeline.md         Research workflow and artifact contract.
   realism_contract.md          Validity rules and rejection criteria.
   evaluation_metrics.md        Paired metrics and error taxonomy.
@@ -82,7 +83,8 @@ quoted strings, or visible gold argument values.
 AST checker, cache, and parallel OpenAI calls.
 
 `analyze` writes paired degradation metrics and review files under
-`artifacts/analysis/`, including raw and adjusted degradation.
+`artifacts/analysis/`, including raw and adjusted degradation plus
+`strong_failure_examples.csv` for qualitative inspection.
 
 To inspect all registered steps:
 
