@@ -82,3 +82,15 @@ enough for consistent auditing.
 sample of strong clean-success/noisy-failure regressions after excluding oracle,
 augmentation, and baseline dataset issues. This is the source table for manual
 inspection and paper examples.
+
+`artifacts/analysis/paper_failure_review.csv` adds first-pass human review
+columns:
+
+- `paper_include`
+- `human_judgment`
+- `short_explanation`
+
+`artifacts/analysis/paper_failure_examples.csv` contains the reviewed rows
+marked for inclusion in the first paper evidence table.
+
+The editable review labels live in `configs/paper_failure_review_labels.csv`.
