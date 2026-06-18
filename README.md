@@ -94,7 +94,8 @@ human review. It currently supports:
 - `llm_prior_thread`: pasted stale ticket/thread plus the current request.
 - `llm_conversation_history`: short history with stale or discarded context.
 - `llm_messy_pre_intent_history`: semi-relevant pre-intent chat where the final
-  user turn contains the clean request verbatim.
+  user turn contains the clean request verbatim. Earlier turns may include
+  concrete abandoned alternatives, but not exact final slot values.
 
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
 AST checker, cache, and parallel OpenAI calls.

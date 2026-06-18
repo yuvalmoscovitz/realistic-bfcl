@@ -73,6 +73,10 @@ Current LLM dimensions:
 `llm_messy_pre_intent_history` models semi-relevant chat before the user has a
 specific intent. The final user turn must contain the clean BFCL request
 verbatim, so the prior turns can be distracting without becoming the oracle.
+Good distractors are concrete but abandoned alternatives, such as maybe visiting
+family in Idaho before a separate New York-to-Boston bus request. Pre-final
+turns must not reveal exact final slot values such as names, cities, dates, IDs,
+quoted strings, file extensions, or server nicknames.
 
 ## 3. Run BFCL-Style Evaluation
 
