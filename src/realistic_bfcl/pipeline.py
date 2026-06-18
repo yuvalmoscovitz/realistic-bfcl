@@ -1513,6 +1513,33 @@ def flip_review_rows(dimension: str) -> list[dict[str, object]]:
     return review_rows
 
 
+def regression_review_rows(flip_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows = []
+    for row in flip_rows:
+        if row["outcome"] != "clean_success_noisy_failure":
+            continue
+        rows.append(
+            {
+                "review_status": "",
+                "manual_error_type": "",
+                "oracle_issue": "",
+                "augmentation_issue": "",
+                "notes": "",
+                "base_id": row["base_id"],
+                "noisy_id": row["noisy_id"],
+                "category": row["category"],
+                "dimension": row["dimension"],
+                "heuristic_error_type": row["heuristic_error_type"],
+                "clean_prompt": row["clean_prompt"],
+                "noisy_prompt": row["noisy_prompt"],
+                "gold": row["gold"],
+                "clean_prediction": row["clean_prediction"],
+                "noisy_prediction": row["noisy_prediction"],
+            }
+        )
+    return rows
+
+
 def analyze() -> None:
     dimensions = [
         dimension
@@ -1528,6 +1555,7 @@ def analyze() -> None:
     for dimension in dimensions:
         flip_rows.extend(flip_review_rows(dimension))
     flip_review_path = REPO_ROOT / "artifacts/analysis/flip_review.csv"
+    regression_review_path = REPO_ROOT / "artifacts/analysis/regression_review.csv"
     write_csv(
         flip_review_path,
         flip_rows,
@@ -1547,6 +1575,28 @@ def analyze() -> None:
             "noisy_prediction",
         ],
     )
+    regression_rows = regression_review_rows(flip_rows)
+    write_csv(
+        regression_review_path,
+        regression_rows,
+        [
+            "review_status",
+            "manual_error_type",
+            "oracle_issue",
+            "augmentation_issue",
+            "notes",
+            "base_id",
+            "noisy_id",
+            "category",
+            "dimension",
+            "heuristic_error_type",
+            "clean_prompt",
+            "noisy_prompt",
+            "gold",
+            "clean_prediction",
+            "noisy_prediction",
+        ],
+    )
     write_json(
         REPO_ROOT / "artifacts/analysis/summary.json",
         {
@@ -1555,9 +1605,13 @@ def analyze() -> None:
             "model": OPENAI_MODEL,
             "dimensions": summaries,
             "flip_review_csv": flip_review_path.relative_to(REPO_ROOT).as_posix(),
+            "regression_review_csv": regression_review_path.relative_to(
+                REPO_ROOT
+            ).as_posix(),
         },
     )
     print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {regression_review_path.relative_to(REPO_ROOT)}")
 
 
 def run_stage(stage: Stage, dry_run: bool) -> None:
