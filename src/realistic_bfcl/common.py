@@ -14,7 +14,7 @@ BFCL_REPOSITORY = "https://github.com/ShishirPatil/gorilla"
 OPENAI_MODEL = "gpt-5.4-nano"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_CONCURRENCY = 8
-OPENAI_MAX_ATTEMPTS = 4
+OPENAI_MAX_ATTEMPTS = 8
 ROUTER_SYSTEM_INSTRUCTION = (
     "Call the provided tool that best satisfies the user request. "
     "Do not answer in prose when a tool call is appropriate."
