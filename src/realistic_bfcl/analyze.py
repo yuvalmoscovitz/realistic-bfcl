@@ -145,25 +145,117 @@ def typo_copied_into_argument(
 
 
 def likely_alias_or_normalization_issue(gold: object, noisy_prediction: object) -> bool:
-    accepted_values = gold_values(gold)
-    noisy_values = [
-        str(value)
-        for arguments in call_arguments(noisy_prediction)
-        for value in flat_values(arguments)
-    ]
-    for noisy_value in noisy_values:
-        compact_noisy = compact_text(noisy_value)
-        if not compact_noisy:
-            continue
-        for accepted_value in accepted_values:
-            compact_accepted = compact_text(accepted_value)
-            if (
-                compact_accepted
-                and compact_accepted != compact_noisy
-                and (compact_accepted in compact_noisy or compact_noisy in compact_accepted)
-            ):
-                return True
+    return argument_value_issue_kind(gold, noisy_prediction) == "oracle_alias_or_format"
+
+
+def json_key(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def accepted_options(value: object) -> list[object]:
+    return value if isinstance(value, list) else [value]
+
+
+def value_matches_option(value: object, option: object) -> bool:
+    if value == option:
+        return True
+    if is_number(value) and is_number(option):
+        return float(value) == float(option)
+    if isinstance(value, str) and isinstance(option, str):
+        return compact_text(value) == compact_text(option)
+    if isinstance(value, list) and isinstance(option, list):
+        return json_key(value) == json_key(option) or compact_text(value) == compact_text(option)
     return False
+
+
+def value_matches_any_option(value: object, options: list[object]) -> bool:
+    return any(value_matches_option(value, option) for option in options)
+
+
+def value_has_numeric_mismatch(value: object, options: list[object]) -> bool:
+    predicted_numbers = [item for item in flat_values(value) if is_number(item)]
+    accepted_numbers = [
+        item for option in options for item in flat_values(option) if is_number(item)
+    ]
+    if not predicted_numbers or not accepted_numbers:
+        return False
+    return not all(
+        any(float(predicted) == float(accepted) for accepted in accepted_numbers)
+        for predicted in predicted_numbers
+    )
+
+
+def alias_like_value(value: object, options: list[object]) -> bool:
+    compact_value = compact_text(value)
+    if not compact_value:
+        return False
+    for option in options:
+        compact_option = compact_text(option)
+        if (
+            compact_option
+            and compact_option != compact_value
+            and (compact_option in compact_value or compact_value in compact_option)
+        ):
+            return True
+    return False
+
+
+def list_items_alias_like(value: object, options: list[object]) -> bool:
+    if not isinstance(value, list):
+        return False
+    accepted_items = [item for option in options for item in flat_values(option)]
+    if not accepted_items:
+        return False
+    return all(
+        value_matches_any_option(item, accepted_items) or alias_like_value(item, accepted_items)
+        for item in value
+    )
+
+
+def argument_value_issue_kind(gold: object, noisy_prediction: object) -> str:
+    """Classify only value-level differences after call names/counts already match."""
+    gold_args = gold_arguments(gold)
+    predicted_args = call_arguments(noisy_prediction)
+    if len(gold_args) != len(predicted_args):
+        return "real"
+
+    saw_alias_or_format = False
+    for expected, predicted in zip(gold_args, predicted_args):
+        for key, accepted in expected.items():
+            if key not in predicted:
+                return "real"
+            predicted_value = predicted[key]
+            options = accepted_options(accepted)
+            if value_matches_any_option(predicted_value, options):
+                continue
+            if value_has_numeric_mismatch(predicted_value, options):
+                return "real"
+            if isinstance(predicted_value, bool) or any(
+                isinstance(option, bool) for option in options
+            ):
+                return "real"
+            if alias_like_value(predicted_value, options) or list_items_alias_like(
+                predicted_value, options
+            ):
+                saw_alias_or_format = True
+                continue
+            return "real"
+
+    return "oracle_alias_or_format" if saw_alias_or_format else "real"
+
+
+def augmentation_text_copied_into_argument(
+    clean_prompt: str, noisy_prompt: str, noisy_prediction: object
+) -> bool:
+    clean_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", clean_prompt)}
+    noisy_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", noisy_prompt)}
+    introduced_tokens = noisy_tokens - clean_tokens
+    argument_text = json.dumps(call_arguments(noisy_prediction)).lower()
+    return any(len(token) >= 5 and token in argument_text for token in introduced_tokens)
 
 
 def regression_label(review: dict[str, object]) -> dict[str, str]:
@@ -189,7 +281,15 @@ def regression_label(review: dict[str, object]) -> dict[str, str]:
         manual_error_type = "wrong_tool_routing"
         notes = "Noisy prediction calls a different tool than the gold oracle."
     elif heuristic == "argument_value_error":
-        if str(review["dimension"]) == "typos" and typo_copied_into_argument(
+        if str(review["dimension"]) == "removed_spaces" and augmentation_text_copied_into_argument(
+            str(review["clean_prompt"]),
+            str(review["noisy_prompt"]),
+            noisy_prediction,
+        ):
+            manual_error_type = "augmentation_text_copied_into_argument_value"
+            augmentation_issue = "possible"
+            notes = "The removed-space artifact appears to have been copied into an argument value."
+        elif str(review["dimension"]) == "typos" and typo_copied_into_argument(
             str(review["clean_prompt"]),
             str(review["noisy_prompt"]),
             noisy_prediction,
@@ -464,6 +564,9 @@ def benchmark_summary_rows(
         adjusted_regression_count = int(metrics["clean_success_noisy_failure"]) - len(
             possible_oracle_issues
         )
+        real_model_regression_count = adjusted_regression_count - len(
+            possible_augmentation_issues
+        )
         clean_correct = int(metrics["clean_correct"])
         rows.append(
             {
@@ -483,6 +586,10 @@ def benchmark_summary_rows(
                 "adjusted_regression_count": adjusted_regression_count,
                 "adjusted_regression_rate_given_clean_success": (
                     adjusted_regression_count / clean_correct if clean_correct else 0.0
+                ),
+                "real_model_regression_count": real_model_regression_count,
+                "real_model_regression_rate_given_clean_success": (
+                    real_model_regression_count / clean_correct if clean_correct else 0.0
                 ),
                 "regressions_by_category": json.dumps(
                     count_by(dimension_regressions, "category"),
@@ -571,6 +678,8 @@ def analyze() -> None:
         "possible_augmentation_issue_regressions",
         "adjusted_regression_count",
         "adjusted_regression_rate_given_clean_success",
+        "real_model_regression_count",
+        "real_model_regression_rate_given_clean_success",
         "regressions_by_category",
         "regressions_by_manual_error_type",
     ]
@@ -583,6 +692,10 @@ def analyze() -> None:
             "model": OPENAI_MODEL,
             "adjusted_metric_rule": (
                 "adjusted_regression_count excludes only rows with " "oracle_issue=possible"
+            ),
+            "real_model_metric_rule": (
+                "real_model_regression_count excludes rows with oracle_issue=possible "
+                "or augmentation_issue=possible"
             ),
             "dimensions": benchmark_rows,
         },
