@@ -613,9 +613,16 @@ ARGUMENTATIVE_TEMPLATES = (
     "be honest and don't dodge it: {prompt}",
 )
 TYPO_REPLACEMENTS = (
+    ("what", "wat"),
+    ("please", "plese"),
+    ("using", "useing"),
+    ("given", "givn"),
+    ("number", "numbr"),
+    ("numbers", "numbrs"),
     ("calculate", "calcuate"),
     ("factorial", "factroial"),
     ("triangle", "traingle"),
+    ("area", "aera"),
     ("height", "heigth"),
     ("circle", "circel"),
     ("radius", "raduis"),
@@ -656,11 +663,17 @@ def argumentative_prompt(clean_prompt: str, index: int) -> str:
 def typo_prompt(clean_prompt: str, index: int) -> str:
     text = clean_prompt
     start = index % len(TYPO_REPLACEMENTS)
+    replacements_applied = 0
     for offset in range(len(TYPO_REPLACEMENTS)):
         source, replacement = TYPO_REPLACEMENTS[(start + offset) % len(TYPO_REPLACEMENTS)]
         updated = re.sub(rf"\b{source}\b", replacement, text, count=1, flags=re.IGNORECASE)
         if updated != text:
-            return updated
+            text = updated
+            replacements_applied += 1
+            if replacements_applied == 2:
+                return text
+    if replacements_applied:
+        return text
     words = text.split()
     for word_index, word in enumerate(words):
         if len(word.strip(".,?!")) > 5:
