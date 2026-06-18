@@ -65,6 +65,24 @@ LLM_DIMENSIONS = (
     ),
 )
 
+SENSITIVE_SLOT_TERMS = {
+    "accessibility": ("accessibility", "accessible", "wheelchair", "mobility"),
+    "include_hidden": ("hidden", "dotfile", "dot file", "dotfiles"),
+    "include_images": ("image", "images", "photo", "photos", "picture", "pictures"),
+    "language": ("language", "english", "spanish", "french", "german", "hebrew"),
+    "number_of_rooms": ("room", "rooms", "bedroom", "bedrooms"),
+    "output_format": ("format", "json", "csv", "markdown", "xml"),
+    "price": ("price", "budget", "cost", "cheap", "affordable", "expensive", "free", "$"),
+    "private_visibility": ("private", "privacy", "public", "visibility"),
+    "rating": ("rating", "rated", "stars", "review score", "reviews"),
+    "recursive": ("recursive", "recursively", "subdirectory", "subdirectories"),
+    "retry_attempts": ("retry", "retries", "attempts"),
+    "review_score": ("rating", "rated", "stars", "review score", "reviews"),
+    "smoking_allowed": ("smoking", "smoke", "non-smoking", "nonsmoking"),
+    "timeout": ("timeout", "time out", "timed out"),
+    "use_ssl": ("ssl", "tls", "encrypted", "encryption"),
+}
+
 
 def llm_augment_model() -> str:
     return os.environ.get("REALISTIC_BFCL_LLM_AUGMENT_MODEL", OPENAI_MODEL)
@@ -92,9 +110,46 @@ def strip_json_fence(text: str) -> str:
     return stripped
 
 
+def schema_property_names(example: dict[str, object]) -> set[str]:
+    names: set[str] = set()
+    functions = example.get("function", [])
+    if not isinstance(functions, list):
+        return names
+
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        parameters = function.get("parameters", {})
+        if not isinstance(parameters, dict):
+            continue
+        properties = parameters.get("properties", {})
+        if not isinstance(properties, dict):
+            continue
+        names.update(str(name) for name in properties)
+
+    return names
+
+
+def forbidden_active_slot_terms(
+    example: dict[str, object],
+    clean_prompt: str,
+) -> dict[str, tuple[str, ...]]:
+    lowered_clean = clean_prompt.lower()
+    forbidden = {}
+    for property_name in sorted(schema_property_names(example)):
+        terms = SENSITIVE_SLOT_TERMS.get(property_name)
+        if not terms:
+            continue
+        absent_terms = tuple(term for term in terms if term.lower() not in lowered_clean)
+        if absent_terms:
+            forbidden[property_name] = absent_terms
+    return forbidden
+
+
 def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> str:
     function_names = [function["name"] for function in example["function"]]
     clean_prompt = conversation_text(example["question"])
+    forbidden_terms = forbidden_active_slot_terms(example, clean_prompt)
     return json.dumps(
         {
             "task": "Generate an oracle-preserving Realistic-BFCL augmentation.",
@@ -103,6 +158,7 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
             "clean_prompt": clean_prompt,
             "gold_tool_calls": example["ground_truth"],
             "available_function_names": function_names,
+            "forbidden_active_slot_terms": forbidden_terms,
             "hard_rules": [
                 "Preserve the final BFCL oracle: same function names, same "
                 "argument values, same number of calls.",
@@ -120,6 +176,9 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "clean prompt already says that in user-facing language.",
                 "The messages must read like normal user/assistant chat, not benchmark "
                 "instructions or developer instructions.",
+                "Do not mention forbidden_active_slot_terms anywhere in the messages, "
+                "even as stale context. Those terms correspond to available schema slots "
+                "that are not active in the clean request.",
             ],
             "output_schema": {
                 "messages": [
@@ -167,6 +226,8 @@ def validate_llm_messages(
 ) -> list[str]:
     clean_prompt = conversation_text(example["question"])
     augmented_text = "\n".join(message["content"] for message in messages)
+    lowered_text = augmented_text.lower()
+    lowered_clean = clean_prompt.lower()
     reasons = []
 
     for number in numeric_tokens(clean_prompt):
@@ -183,6 +244,14 @@ def validate_llm_messages(
             augmented_text,
         ):
             reasons.append(f"visible gold literal missing from augmentation: {literal!r}")
+
+    for property_name, terms in forbidden_active_slot_terms(example, clean_prompt).items():
+        for term in terms:
+            if term.lower() in lowered_text:
+                reasons.append(
+                    "augmentation introduced inactive schema slot term "
+                    f"{term!r} for property {property_name!r}"
+                )
 
     if not messages:
         reasons.append("augmentation returned no messages")
@@ -201,8 +270,6 @@ def validate_llm_messages(
         "function call",
         "augmentation",
     )
-    lowered_text = augmented_text.lower()
-    lowered_clean = clean_prompt.lower()
     for term in meta_terms:
         if term in lowered_text and term not in lowered_clean:
             reasons.append(f"benchmark meta-language leaked into prompt: {term!r}")
