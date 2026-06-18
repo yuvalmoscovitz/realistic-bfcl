@@ -189,6 +189,19 @@ def value_has_numeric_mismatch(value: object, options: list[object]) -> bool:
     )
 
 
+def percent_scale_ambiguity(value: object, options: list[object]) -> bool:
+    predicted_numbers = [item for item in flat_values(value) if is_number(item)]
+    accepted_numbers = [
+        item for option in options for item in flat_values(option) if is_number(item)
+    ]
+    if not predicted_numbers or not accepted_numbers:
+        return False
+    return all(
+        any(float(predicted) == float(accepted) * 100 for accepted in accepted_numbers)
+        for predicted in predicted_numbers
+    )
+
+
 def alias_like_value(value: object, options: list[object]) -> bool:
     compact_value = compact_text(value)
     if not compact_value:
@@ -248,6 +261,38 @@ def argument_value_issue_kind(gold: object, noisy_prediction: object) -> str:
     return "oracle_alias_or_format" if saw_alias_or_format else "real"
 
 
+def has_baseline_dataset_ambiguity(
+    clean_prompt: str, noisy_prompt: str, gold: object, noisy_prediction: object
+) -> bool:
+    """Identify BFCL prompt/schema cases where the oracle requires unstated normalization."""
+    if "%" not in clean_prompt and "%" not in noisy_prompt:
+        return False
+
+    gold_args = gold_arguments(gold)
+    predicted_args = call_arguments(noisy_prediction)
+    if len(gold_args) != len(predicted_args):
+        return False
+
+    saw_percent_scale_issue = False
+    for expected, predicted in zip(gold_args, predicted_args):
+        for key, accepted in expected.items():
+            if key not in predicted:
+                return False
+            predicted_value = predicted[key]
+            options = accepted_options(accepted)
+            if value_matches_any_option(predicted_value, options):
+                continue
+            if percent_scale_ambiguity(predicted_value, options):
+                saw_percent_scale_issue = True
+                continue
+            if alias_like_value(predicted_value, options) or list_items_alias_like(
+                predicted_value, options
+            ):
+                continue
+            return False
+    return saw_percent_scale_issue
+
+
 def augmentation_text_copied_into_argument(
     clean_prompt: str, noisy_prompt: str, noisy_prediction: object
 ) -> bool:
@@ -266,6 +311,7 @@ def regression_label(review: dict[str, object]) -> dict[str, str]:
     expected_names = gold_call_names(gold)
     oracle_issue = "no"
     augmentation_issue = "no"
+    baseline_dataset_issue = "no"
 
     if heuristic == "call_count_mismatch":
         if len(noisy_names) < len(expected_names):
@@ -297,6 +343,18 @@ def regression_label(review: dict[str, object]) -> dict[str, str]:
             manual_error_type = "typo_copied_into_argument_value"
             augmentation_issue = "possible"
             notes = "The typo appears to have been copied into an argument value."
+        elif has_baseline_dataset_ambiguity(
+            str(review["clean_prompt"]),
+            str(review["noisy_prompt"]),
+            gold,
+            noisy_prediction,
+        ):
+            manual_error_type = "baseline_dataset_ambiguity"
+            baseline_dataset_issue = "possible"
+            notes = (
+                "The BFCL prompt and schema appear ambiguous relative to the gold "
+                "argument convention."
+            )
         elif likely_alias_or_normalization_issue(gold, noisy_prediction):
             manual_error_type = "entity_or_alias_normalization_mismatch"
             oracle_issue = "possible"
@@ -336,6 +394,7 @@ def regression_label(review: dict[str, object]) -> dict[str, str]:
         "manual_error_type": manual_error_type,
         "oracle_issue": oracle_issue,
         "augmentation_issue": augmentation_issue,
+        "baseline_dataset_issue": baseline_dataset_issue,
         "notes": notes,
     }
 
@@ -561,11 +620,18 @@ def benchmark_summary_rows(
         possible_augmentation_issues = [
             row for row in dimension_regressions if row["augmentation_issue"] == "possible"
         ]
+        possible_baseline_dataset_issues = [
+            row
+            for row in dimension_regressions
+            if row["baseline_dataset_issue"] == "possible"
+        ]
         adjusted_regression_count = int(metrics["clean_success_noisy_failure"]) - len(
             possible_oracle_issues
         )
         real_model_regression_count = adjusted_regression_count - len(
             possible_augmentation_issues
+        ) - len(
+            possible_baseline_dataset_issues
         )
         clean_correct = int(metrics["clean_correct"])
         rows.append(
@@ -583,6 +649,9 @@ def benchmark_summary_rows(
                 "raw_regression_count": metrics["clean_success_noisy_failure"],
                 "possible_oracle_issue_regressions": len(possible_oracle_issues),
                 "possible_augmentation_issue_regressions": len(possible_augmentation_issues),
+                "possible_baseline_dataset_issue_regressions": len(
+                    possible_baseline_dataset_issues
+                ),
                 "adjusted_regression_count": adjusted_regression_count,
                 "adjusted_regression_rate_given_clean_success": (
                     adjusted_regression_count / clean_correct if clean_correct else 0.0
@@ -650,6 +719,7 @@ def analyze() -> None:
             "manual_error_type",
             "oracle_issue",
             "augmentation_issue",
+            "baseline_dataset_issue",
             "notes",
             "base_id",
             "noisy_id",
@@ -676,6 +746,7 @@ def analyze() -> None:
         "raw_regression_count",
         "possible_oracle_issue_regressions",
         "possible_augmentation_issue_regressions",
+        "possible_baseline_dataset_issue_regressions",
         "adjusted_regression_count",
         "adjusted_regression_rate_given_clean_success",
         "real_model_regression_count",
@@ -695,7 +766,7 @@ def analyze() -> None:
             ),
             "real_model_metric_rule": (
                 "real_model_regression_count excludes rows with oracle_issue=possible "
-                "or augmentation_issue=possible"
+                "or augmentation_issue=possible or baseline_dataset_issue=possible"
             ),
             "dimensions": benchmark_rows,
         },
