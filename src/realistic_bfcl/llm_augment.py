@@ -84,6 +84,13 @@ SENSITIVE_SLOT_TERMS = {
     "timeout": ("timeout", "time out", "timed out"),
     "use_ssl": ("ssl", "tls", "encrypted", "encryption"),
 }
+PRESERVED_DIRECTIVE_TERMS = (
+    "exactly",
+    "verbatim",
+    "proper llm",
+    "respond in json",
+    "using your tools",
+)
 
 
 def llm_augment_model() -> str:
@@ -170,6 +177,10 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "explicitly stale, background, cancelled, or irrelevant.",
                 "Do not add active constraints such as new filters, output "
                 "formats, privacy settings, locations, dates, counts, or preferences.",
+                "Preserve explicit user directives such as exactly, verbatim, output "
+                "format, and tool-use wording when they appear in the clean prompt.",
+                "Do not disambiguate ambiguous entities, names, or locations unless the "
+                "clean prompt already disambiguates them.",
                 "For multi-turn output, the final user message must be the actionable request.",
                 "Keep the text realistic, not adversarial puzzle text.",
                 "Do not mention BFCL, benchmark, oracle, gold, original request, "
@@ -246,6 +257,10 @@ def validate_llm_messages(
             augmented_text,
         ):
             reasons.append(f"visible gold literal missing from augmentation: {literal!r}")
+
+    for term in PRESERVED_DIRECTIVE_TERMS:
+        if term in lowered_clean and term not in lowered_text:
+            reasons.append(f"clean directive term missing from augmentation: {term!r}")
 
     for property_name, terms in forbidden_active_slot_terms(example, clean_prompt).items():
         for term in terms:
