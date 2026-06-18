@@ -1,4 +1,4 @@
-.PHONY: status lint freeze-bfcl clean-baseline augment-overhang augment-incremental verify-noisy paired-eval analyze defenses
+.PHONY: status lint freeze-bfcl clean-baseline augment-overhang augment-mobile-shorthand augment-impatient-tone augment-messy-punctuation augment-social-filler verify-noisy paired-eval analyze defenses
 
 PYTHON ?= python
 RUN_STAGE = $(PYTHON) scripts/run_stage.py
@@ -18,8 +18,17 @@ clean-baseline:
 augment-overhang:
 	$(RUN_STAGE) augment-overhang
 
-augment-incremental:
-	$(RUN_STAGE) augment-incremental
+augment-mobile-shorthand:
+	$(RUN_STAGE) augment-mobile-shorthand
+
+augment-impatient-tone:
+	$(RUN_STAGE) augment-impatient-tone
+
+augment-messy-punctuation:
+	$(RUN_STAGE) augment-messy-punctuation
+
+augment-social-filler:
+	$(RUN_STAGE) augment-social-filler
 
 verify-noisy:
 	$(RUN_STAGE) verify-noisy

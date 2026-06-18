@@ -21,7 +21,10 @@ evaluation:
 generation:
   accepted_dimensions:
     - conversational_overhang
-    - incremental_slot_revelation
+    - casual_mobile_shorthand
+    - impatient_tone
+    - messy_punctuation_casing
+    - casual_social_filler
   rejected_by_default:
     - adversarial_word_games
     - random_typos_without_human_plausibility

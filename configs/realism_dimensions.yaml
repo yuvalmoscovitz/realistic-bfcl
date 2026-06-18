@@ -17,23 +17,6 @@ dimensions:
       - weakens or removes a required constraint
       - makes multiple tool calls plausible when the clean oracle has one
 
-  incremental_slot_revelation:
-    status: planned
-    description: Split one clean request across multiple natural turns while keeping the final user intent equivalent.
-    must_preserve:
-      - final function_name
-      - final argument set
-      - argument_values
-      - tool_schema
-    allowed_noise:
-      - missing slot in an early turn that is supplied later
-      - short follow-up answer
-      - natural clarification-like progression
-    rejection_rules:
-      - final turn leaves any required slot underspecified
-      - conversation introduces conflicting values without a repair rule
-      - assistant turn teaches or hints at the target tool call
-
   casual_mobile_shorthand:
     status: planned
     description: Compress clean requests into lowercase mobile-style fragments.
@@ -69,3 +52,39 @@ dimensions:
       - introduces a new task constraint
       - changes the requested action
       - makes refusal or safety behavior the intended target
+
+  messy_punctuation_casing:
+    status: planned
+    description: Add realistic casing and punctuation messiness around a valid request.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - lowercase or uppercase casing
+      - repeated punctuation
+      - trailing ellipses
+      - casual suffixes like pls
+    rejection_rules:
+      - changes any value, unit, quantity, entity, or date
+      - removes the action or object needed to infer the tool
+      - adds a new constraint not present in the clean prompt
+
+  casual_social_filler:
+    status: planned
+    description: Wrap valid requests in casual address terms or short filler.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - address terms like hey, yo, bro, brother
+      - polite filler
+      - short casual lead-ins
+      - abbreviations like pls or u
+    rejection_rules:
+      - changes the requested action
+      - introduces a deadline, preference, or extra condition
+      - makes the request ambiguous when the clean prompt is not

@@ -31,33 +31,6 @@ ROUTER_SYSTEM_INSTRUCTION = (
 ROUTER_TOOL_CHOICE = "required"
 ROUTER_MAX_OUTPUT_TOKENS = 256
 ROUTER_MESSAGE_SERIALIZATION = "preserve_bfcl_turns_v1"
-INCREMENTAL_GENERATOR_MAX_OUTPUT_TOKENS = 512
-INCREMENTAL_GENERATOR_MAX_ATTEMPTS = 4
-INCREMENTAL_GENERATOR_SYSTEM_INSTRUCTION = (
-    "You generate realistic multi-turn user conversations for a function "
-    "calling benchmark. Preserve the exact final user intent. Do not add, "
-    "remove, infer, normalize, translate, or change any constraint, number, "
-    "date, location, entity, path, quoted text, list, unit, or option. "
-    "Use only user turns. Return only valid JSON."
-)
-INCREMENTAL_GENERATOR_USER_INSTRUCTION = (
-    "Split this single user request into 2 to 5 natural user turns where "
-    "the user reveals the intent and slots gradually. Use casual realistic "
-    "phrasing, preserve all required literals and slot values exactly, and "
-    "do not introduce new facts. Copy decimal values exactly; do not round, "
-    "truncate, or rewrite numeric values. Write only user messages; do not "
-    "use assistant-like acknowledgements such as 'sure', 'great', or 'okay' "
-    "at the start of a turn. Do not append required values as standalone "
-    "fragments after an otherwise complete sentence. Do not mention tool, "
-    "function, API, or library names unless the clean request already did."
-)
-INCREMENTAL_VALIDATION_VERSION = "oracle_literal_groups_v13"
-NUMERIC_TOKEN_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9.])-?\d+(?:\.\d+)?(?![A-Za-z0-9])"
-)
-STANDALONE_TRAILING_NUMBER_PATTERN = re.compile(
-    r"[.!?]\s+-?\d+(?:\.\d+)?\s*$"
-)
 RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
 BFCL_CATEGORY_FILES = {
     "simple_python": (
@@ -81,7 +54,8 @@ DIMENSION_FILES = {
     "conversational_overhang": "conversational_overhang.jsonl",
     "casual_mobile_shorthand": "casual_mobile_shorthand.jsonl",
     "impatient_tone": "impatient_tone.jsonl",
-    "incremental_slot_revelation": "incremental_slot_revelation.jsonl",
+    "messy_punctuation_casing": "messy_punctuation_casing.jsonl",
+    "casual_social_filler": "casual_social_filler.jsonl",
 }
 
 
@@ -133,13 +107,18 @@ STAGES: tuple[Stage, ...] = (
         next_action="Run paired evaluation and inspect whether user tone changes routing.",
     ),
     Stage(
-        name="augment-incremental",
-        purpose="Split clean requests across natural multi-turn slot revelation.",
+        name="augment-messy-punctuation",
+        purpose="Generate requests with realistic casing and punctuation noise.",
         inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
-        outputs=("artifacts/generated/incremental_slot_revelation.jsonl",),
-        next_action=(
-            "Implement multi-turn prompt construction without changing the final oracle."
-        ),
+        outputs=("artifacts/generated/messy_punctuation_casing.jsonl",),
+        next_action="Run paired evaluation and inspect whether surface messiness hurts routing.",
+    ),
+    Stage(
+        name="augment-social-filler",
+        purpose="Generate requests wrapped in casual address terms and filler.",
+        inputs=("artifacts/frozen/bfcl_manifest.json", "configs/realism_dimensions.yaml"),
+        outputs=("artifacts/generated/casual_social_filler.jsonl",),
+        next_action="Run paired evaluation and inspect whether casual filler distracts routing.",
     ),
     Stage(
         name="verify-noisy",
@@ -600,23 +579,6 @@ def input_fingerprint(example: dict[str, object]) -> str:
     )
 
 
-def generation_fingerprint(example: dict[str, object]) -> str:
-    return stable_hash(
-        {
-            "model": OPENAI_MODEL,
-            "dimension": "incremental_slot_revelation",
-            "question": example["question"],
-            "function": example["function"],
-            "ground_truth": example["ground_truth"],
-            "system_instruction": INCREMENTAL_GENERATOR_SYSTEM_INSTRUCTION,
-            "user_instruction": INCREMENTAL_GENERATOR_USER_INSTRUCTION,
-            "max_output_tokens": INCREMENTAL_GENERATOR_MAX_OUTPUT_TOKENS,
-            "max_attempts": INCREMENTAL_GENERATOR_MAX_ATTEMPTS,
-            "validation_version": INCREMENTAL_VALIDATION_VERSION,
-        }
-    )
-
-
 OVERHANG_TEMPLATES = (
     "hey quick one - {prompt}",
     "before i forget, {prompt}",
@@ -641,6 +603,23 @@ IMPATIENT_TEMPLATES = (
     "seriously, {prompt}",
     "come on, {prompt}",
 )
+SOCIAL_FILLER_TEMPLATES = (
+    "hey, {prompt}",
+    "yo can you help - {prompt}",
+    "brother please {prompt}",
+    "quick question, {prompt}",
+    "pls {prompt}",
+    "hi, sorry, {prompt}",
+    "need a hand here: {prompt}",
+    "can u do this: {prompt}",
+)
+MESSY_PUNCTUATION_TEMPLATES = (
+    "{prompt}??",
+    "{prompt} pls",
+    "{prompt} ...",
+    "{prompt}!!",
+    "{prompt}",
+)
 
 
 def lowercase_first_alpha(text: str) -> str:
@@ -658,6 +637,21 @@ def overhang_prompt(clean_prompt: str, index: int) -> str:
 def impatient_prompt(clean_prompt: str, index: int) -> str:
     template = IMPATIENT_TEMPLATES[index % len(IMPATIENT_TEMPLATES)]
     return template.format(prompt=lowercase_first_alpha(clean_prompt))
+
+
+def social_filler_prompt(clean_prompt: str, index: int) -> str:
+    template = SOCIAL_FILLER_TEMPLATES[index % len(SOCIAL_FILLER_TEMPLATES)]
+    return template.format(prompt=lowercase_first_alpha(clean_prompt))
+
+
+def messy_punctuation_prompt(clean_prompt: str, index: int) -> str:
+    text = clean_prompt.strip()
+    if index % 3 == 0:
+        text = text.lower()
+    elif index % 3 == 1:
+        text = text.upper()
+    template = MESSY_PUNCTUATION_TEMPLATES[index % len(MESSY_PUNCTUATION_TEMPLATES)]
+    return template.format(prompt=text)
 
 
 def mobile_shorthand_prompt(clean_prompt: str, _index: int) -> str:
@@ -694,7 +688,13 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
         raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
 
     rows = []
-    for index, example in enumerate(read_jsonl(subset_path)):
+    examples = read_jsonl(subset_path)
+    limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
+    if limit is not None:
+        examples = examples[:limit]
+        print(f"Limiting augmentation to first {len(examples)} examples")
+
+    for index, example in enumerate(examples):
         rows.append(
             {
                 "id": f"{example['id']}__{suffix}",
@@ -727,449 +727,12 @@ def augment_impatient_tone() -> None:
     augment_dimension("impatient_tone", "impatient", impatient_prompt)
 
 
-def response_text(response: dict[str, object]) -> str:
-    texts = []
-    for item in response.get("output", []):
-        if not isinstance(item, dict):
-            continue
-        if item.get("type") == "message":
-            for content in item.get("content", []):
-                if isinstance(content, dict) and "text" in content:
-                    texts.append(str(content["text"]))
-        elif item.get("type") == "output_text" and "text" in item:
-            texts.append(str(item["text"]))
-    if texts:
-        return "\n".join(texts)
-    if "output_text" in response:
-        return str(response["output_text"])
-    return ""
+def augment_messy_punctuation() -> None:
+    augment_dimension("messy_punctuation_casing", "messy", messy_punctuation_prompt)
 
 
-def json_from_text(text: str) -> dict[str, object]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?", "", stripped).strip()
-        stripped = re.sub(r"```$", "", stripped).strip()
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("No JSON object found in generator response.")
-    return json.loads(stripped[start : end + 1])
-
-
-def clean_prompt(example: dict[str, object]) -> str:
-    return conversation_text(example["question"])
-
-
-def literal_requirements(text: str) -> list[str]:
-    single_quoted = re.findall(r"(?<![A-Za-z0-9])'([^'\n]+)'(?![A-Za-z0-9])", text)
-    double_quoted = re.findall(r'"([^"\n]+)"', text)
-    unwrapped_text = text.strip().strip("'\"").strip()
-    literals = [
-        literal
-        for literal in single_quoted + double_quoted
-        if literal.strip() != unwrapped_text
-    ]
-    literals.extend(re.findall(r"\[[^\]]+\]", text))
-    literals.extend(re.findall(r"\b[A-Za-z]:/[^\s,;?]+", text))
-    literals.extend(numeric_token_strings(text))
-    return [literal.strip().strip(".,;:?!") for literal in literals if literal.strip()]
-
-
-def is_primitive(value: object) -> bool:
-    return isinstance(value, (str, int, float, bool)) or value is None
-
-
-def normalize_requirement_text(text: str) -> str:
-    return re.sub(r"\s+", "", text.lower()).replace("^", "**")
-
-
-def numeric_value(text: str) -> float | None:
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
-def literal_present(literal: str, joined: str, normalized_joined: str) -> bool:
-    literal = literal.strip()
-    if not literal:
-        return True
-    literal_number = numeric_value(literal)
-    if literal_number is not None:
-        for match in re.findall(r"-?\d+(?:\.\d+)?", joined):
-            match_number = numeric_value(match)
-            if match_number == literal_number:
-                return True
-        return False
-    if re.fullmatch(r"[A-Za-z]{1,3}", literal):
-        return bool(re.search(rf"\b{re.escape(literal.lower())}\b", joined))
-    return literal.lower() in joined or normalize_requirement_text(literal) in normalized_joined
-
-
-def primitive_literal(value: object) -> str | None:
-    if value == "":
-        return None
-    if isinstance(value, bool):
-        return str(value).lower()
-    if isinstance(value, (int, float)):
-        return str(value)
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-def numeric_literals(text: str) -> list[float]:
-    values = []
-    for match in numeric_token_strings(text):
-        value = numeric_value(match)
-        if value is not None:
-            values.append(value)
-    return values
-
-
-def numeric_token_strings(text: str) -> list[str]:
-    tokens = []
-    for match in NUMERIC_TOKEN_PATTERN.finditer(text):
-        line_prefix = text[: match.start()].rsplit("\n", 1)[-1]
-        if match.end() < len(text) and text[match.end()] == ")" and not line_prefix.strip():
-            continue
-        tokens.append(match.group(0))
-    return tokens
-
-
-def oracle_literal_groups(value: object, sequence_required: bool = False) -> list[list[str]]:
-    if isinstance(value, dict):
-        groups = []
-        for child in value.values():
-            groups.extend(oracle_literal_groups(child))
-        return groups
-    if isinstance(value, list):
-        if all(is_primitive(child) for child in value):
-            has_empty_default = "" in value
-            literals = []
-            for child in value:
-                if has_empty_default and child == 0:
-                    continue
-                literal = primitive_literal(child)
-                if literal:
-                    literals.append(literal)
-            if sequence_required:
-                return [[literal] for literal in literals]
-            return [literals] if literals else []
-        if len(value) == 1 and isinstance(value[0], list):
-            return oracle_literal_groups(value[0], sequence_required=True)
-        groups = []
-        for child in value:
-            groups.extend(oracle_literal_groups(child))
-        return groups
-    literal = primitive_literal(value)
-    return [[literal]] if literal else []
-
-
-def function_required_parameters(example: dict[str, object]) -> dict[str, set[str]]:
-    required_by_function = {}
-    for function_doc in example["function"]:
-        parameters = function_doc.get("parameters", {})
-        if not isinstance(parameters, dict):
-            continue
-        required = parameters.get("required", [])
-        if not isinstance(required, list):
-            required = []
-        required_by_function[str(function_doc["name"])] = {str(name) for name in required}
-    return required_by_function
-
-
-def required_oracle_literals(example: dict[str, object]) -> list[str]:
-    required_by_function = function_required_parameters(example)
-    literals = []
-    for call in example["ground_truth"]:
-        if not isinstance(call, dict):
-            continue
-        for function_name, arguments in call.items():
-            if not isinstance(arguments, dict):
-                continue
-            required_parameters = required_by_function.get(str(function_name), set())
-            for argument_name, value in arguments.items():
-                if str(argument_name) not in required_parameters:
-                    continue
-                for group in oracle_literal_groups(value):
-                    literals.extend(group)
-    return literals
-
-
-def validation_requirement_groups(example: dict[str, object]) -> list[list[str]]:
-    clean_text = clean_prompt(example).lower()
-    normalized_clean_text = normalize_requirement_text(clean_text)
-    groups = [[literal] for literal in literal_requirements(clean_prompt(example))]
-    groups.extend(
-        group
-        for group in oracle_literal_groups(example["ground_truth"])
-        if any(literal_present(literal, clean_text, normalized_clean_text) for literal in group)
-    )
-    deduped = []
-    seen = set()
-    for group in groups:
-        normalized_group = tuple(sorted(set(group), key=lambda item: item.lower()))
-        if normalized_group and normalized_group not in seen:
-            seen.add(normalized_group)
-            deduped.append(list(normalized_group))
-    return deduped
-
-
-def allowed_numeric_values(example: dict[str, object]) -> set[float]:
-    allowed = set(numeric_literals(clean_prompt(example)))
-    for literal in required_oracle_literals(example):
-        value = numeric_value(literal)
-        if value is not None:
-            allowed.add(value)
-    return allowed
-
-
-def unexpected_numeric_literals(example: dict[str, object], turns: list[str]) -> list[str]:
-    allowed = allowed_numeric_values(example)
-    unexpected = []
-    for turn in turns:
-        for match in numeric_token_strings(turn):
-            value = numeric_value(match)
-            if value is not None and value not in allowed:
-                unexpected.append(match)
-    return sorted(set(unexpected), key=lambda item: (numeric_value(item), item))
-
-
-def unexpected_function_name_mentions(
-    example: dict[str, object], turns: list[str]
-) -> list[str]:
-    clean_text = clean_prompt(example).lower()
-    generated_text = " ".join(turn.lower() for turn in turns)
-    unexpected = []
-    for function_doc in example["function"]:
-        function_name = str(function_doc["name"]).lower()
-        if function_name in generated_text and function_name not in clean_text:
-            unexpected.append(function_name)
-    return sorted(set(unexpected))
-
-
-def validate_incremental_turns(
-    example: dict[str, object], turns: object
-) -> tuple[bool, list[str]]:
-    reasons = []
-    if not isinstance(turns, list):
-        return False, ["turns is not a list"]
-    if len(turns) < 2 or len(turns) > 5:
-        reasons.append("turn count must be between 2 and 5")
-    if any(not isinstance(turn, str) or not turn.strip() for turn in turns):
-        reasons.append("all turns must be non-empty strings")
-    if reasons:
-        return False, reasons
-
-    for turn in turns:
-        if STANDALONE_TRAILING_NUMBER_PATTERN.search(turn.strip()):
-            reasons.append("standalone numeric fragment after sentence")
-            break
-
-    joined = " ".join(str(turn).lower() for turn in turns)
-    normalized_joined = normalize_requirement_text(joined)
-    for group in validation_requirement_groups(example):
-        if not any(literal_present(literal, joined, normalized_joined) for literal in group):
-            reasons.append("missing literal: " + " or ".join(group))
-            if len(reasons) >= 6:
-                break
-    for literal in unexpected_numeric_literals(example, turns):
-        reasons.append(f"unexpected numeric literal: {literal}")
-        if len(reasons) >= 6:
-            break
-    for function_name in unexpected_function_name_mentions(example, turns):
-        reasons.append(f"unexpected function name mention: {function_name}")
-        if len(reasons) >= 6:
-            break
-    return not reasons, reasons
-
-
-def incremental_generator_payload(
-    example: dict[str, object], repair_reasons: list[str] | None = None
-) -> dict[str, object]:
-    requirement_groups = validation_requirement_groups(example)
-    allowed_numbers = sorted(allowed_numeric_values(example))
-    repair_text = ""
-    if repair_reasons:
-        repair_text = (
-            "\nPrevious draft failed validation for these reasons: "
-            + "; ".join(repair_reasons)
-            + "\nReturn a corrected JSON object."
-        )
-    return {
-        "model": OPENAI_MODEL,
-        "input": [
-            {
-                "role": "system",
-                "content": INCREMENTAL_GENERATOR_SYSTEM_INSTRUCTION,
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"{INCREMENTAL_GENERATOR_USER_INSTRUCTION}\n\n"
-                    f"Clean request: {clean_prompt(example)}\n\n"
-                    "Required literals or accepted alternatives that must appear in the "
-                    "combined turns:\n"
-                    f"{json.dumps(requirement_groups, ensure_ascii=True)}\n\n"
-                    "Allowed numeric values in the combined turns; do not use any other "
-                    "digits or numeric values:\n"
-                    f"{json.dumps(allowed_numbers)}\n\n"
-                    "Return JSON with this shape:\n"
-                    "{\"turns\":[\"...\",\"...\"],\"strategy\":\"llm_slot_revelation\"}"
-                    f"{repair_text}"
-                ),
-            },
-        ],
-        "max_output_tokens": INCREMENTAL_GENERATOR_MAX_OUTPUT_TOKENS,
-    }
-
-
-def call_incremental_generator(
-    example: dict[str, object], api_key: str, repair_reasons: list[str] | None = None
-) -> dict[str, object]:
-    response = openai_retry_json(incremental_generator_payload(example, repair_reasons), api_key)
-    parsed = json_from_text(response_text(response))
-    if not isinstance(parsed, dict):
-        raise ValueError("Generator response JSON must be an object.")
-    turns = parsed.get("turns")
-    valid, reasons = validate_incremental_turns(example, turns)
-    return {
-        "id": example["id"],
-        "input_fingerprint": generation_fingerprint(example),
-        "response_id": response.get("id"),
-        "usage": response.get("usage"),
-        "turns": turns,
-        "strategy": parsed.get("strategy", "llm_slot_revelation"),
-        "valid": valid,
-        "validation_reasons": reasons,
-    }
-
-
-def run_incremental_generation(example: dict[str, object], api_key: str) -> dict[str, object]:
-    reasons = None
-    last_generation = None
-    for _attempt in range(INCREMENTAL_GENERATOR_MAX_ATTEMPTS):
-        try:
-            generation = call_incremental_generator(example, api_key, reasons)
-        except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
-            reasons = [f"{type(exc).__name__}: {exc}"]
-            continue
-        if generation["valid"]:
-            return generation
-        last_generation = generation
-        reasons = [str(reason) for reason in generation["validation_reasons"]]
-    if last_generation is None:
-        raise RuntimeError(
-            f"Incremental generation failed for {example['id']}: "
-            + "; ".join(str(reason) for reason in reasons or [])
-        )
-    raise RuntimeError(
-        f"Incremental generation failed validation for {example['id']}: "
-        + "; ".join(str(reason) for reason in last_generation["validation_reasons"])
-    )
-
-
-def incremental_messages(turns: list[str]) -> object:
-    return [[{"role": "user", "content": turn} for turn in turns]]
-
-
-def augment_incremental() -> None:
-    subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
-    output_path = REPO_ROOT / "artifacts/generated/incremental_slot_revelation.jsonl"
-    cache_path = REPO_ROOT / "artifacts/generated/incremental_slot_revelation_cache.jsonl"
-
-    if not subset_path.exists():
-        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run freeze-bfcl first.")
-
-    examples = read_jsonl(subset_path)
-    limit = optional_positive_int_env("REALISTIC_BFCL_INCREMENTAL_LIMIT")
-    if limit is not None:
-        examples = examples[:limit]
-        print(f"Limiting incremental generation to first {len(examples)} examples")
-    examples_by_id = {example["id"]: example for example in examples}
-    expected_fingerprints = {
-        example["id"]: generation_fingerprint(example) for example in examples
-    }
-    if cache_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_GENERATION"):
-        cached_generations = {}
-        stale_count = 0
-        invalid_count = 0
-        for row in read_jsonl(cache_path):
-            row_id = row["id"]
-            if row.get("input_fingerprint") != expected_fingerprints.get(row_id):
-                stale_count += 1
-                continue
-            valid, reasons = validate_incremental_turns(examples_by_id[row_id], row.get("turns"))
-            if not valid:
-                invalid_count += 1
-                continue
-            row["valid"] = True
-            row["validation_reasons"] = reasons
-            cached_generations[row_id] = row
-        print(
-            f"Loaded {len(cached_generations)} cached incremental generations "
-            f"({stale_count} stale, {invalid_count} invalid ignored)"
-        )
-    else:
-        cached_generations = {}
-
-    missing_examples = [
-        example for example in examples if example["id"] not in cached_generations
-    ]
-    if missing_examples:
-        api_key = openai_api_key()
-        concurrency = min(openai_concurrency(), len(missing_examples))
-        print(
-            f"Running {len(missing_examples)} missing incremental generations "
-            f"at concurrency {concurrency}"
-        )
-        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {
-                executor.submit(run_incremental_generation, example, api_key): example
-                for example in missing_examples
-            }
-            for future in concurrent.futures.as_completed(futures):
-                example = futures[future]
-                generation = future.result()
-                cached_generations[example["id"]] = generation
-                append_jsonl(cache_path, generation)
-                print(f"Generated incremental turns for {example['id']}")
-    else:
-        print("All incremental generations were cached")
-
-    rows = []
-    for example in examples:
-        generation = cached_generations[example["id"]]
-        valid, reasons = validate_incremental_turns(example, generation.get("turns"))
-        if not valid:
-            raise RuntimeError(
-                f"Cached generation failed validation for {example['id']}: "
-                + "; ".join(str(reason) for reason in reasons)
-            )
-        rows.append(
-            {
-                "id": f"{example['id']}__incremental",
-                "base_id": example["id"],
-                "category": example["category"],
-                "dimension": "incremental_slot_revelation",
-                "question": incremental_messages(generation["turns"]),
-                "function": example["function"],
-                "ground_truth": example["ground_truth"],
-                "split_strategy": generation["strategy"],
-                "generation_response_id": generation.get("response_id"),
-                "oracle_preservation": {
-                    "function_schema_unchanged": True,
-                    "ground_truth_unchanged": True,
-                    "literal_validation_passed": valid,
-                },
-            }
-        )
-
-    write_jsonl(cache_path, [cached_generations[example["id"]] for example in examples])
-    write_jsonl(output_path, rows)
-    print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
+def augment_social_filler() -> None:
+    augment_dimension("casual_social_filler", "social", social_filler_prompt)
 
 
 def accuracy_metrics(predictions: list[dict[str, object]]) -> dict[str, object]:
@@ -1845,8 +1408,11 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
     if stage.name == "augment-impatient-tone":
         augment_impatient_tone()
         return
-    if stage.name == "augment-incremental":
-        augment_incremental()
+    if stage.name == "augment-messy-punctuation":
+        augment_messy_punctuation()
+        return
+    if stage.name == "augment-social-filler":
+        augment_social_filler()
         return
     if stage.name == "paired-eval":
         paired_eval()
