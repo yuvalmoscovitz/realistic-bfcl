@@ -468,6 +468,13 @@ def validate_llm_messages(
         and final_user_message in "\n".join(message["content"] for message in messages[:-1])
     ):
         reasons.append("pre-final turns already contain final clean user message")
+    if dimension.name == "llm_messy_pre_intent_history":
+        pre_final_messages = messages[:-1] if messages else []
+        if not 5 <= len(pre_final_messages) <= 9:
+            reasons.append(
+                "llm_messy_pre_intent_history must contain 5-9 messages before "
+                "the appended final request"
+            )
 
     meta_terms = (
         "bfcl",

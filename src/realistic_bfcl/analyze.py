@@ -693,6 +693,23 @@ def strong_failure_examples(regression_rows: list[dict[str, object]]) -> list[di
     ]
 
 
+def strong_failure_example_row(row: dict[str, object], rank: int) -> dict[str, object]:
+    return {
+        "rank": rank,
+        "evidence_reason": strong_failure_reason(row),
+        "base_id": row["base_id"],
+        "noisy_id": row["noisy_id"],
+        "category": row["category"],
+        "dimension": row["dimension"],
+        "manual_error_type": row["manual_error_type"],
+        "clean_prompt": row["clean_prompt"],
+        "noisy_prompt": row["noisy_prompt"],
+        "gold": row["gold"],
+        "clean_prediction": row["clean_prediction"],
+        "noisy_prediction": row["noisy_prediction"],
+    }
+
+
 def paper_review_labels() -> dict[str, dict[str, str]]:
     path = REPO_ROOT / "configs/paper_failure_review_labels.csv"
     if not path.exists():
@@ -710,10 +727,22 @@ def paper_review_labels() -> dict[str, dict[str, str]]:
 
 def paper_failure_review_rows(
     strong_examples: list[dict[str, object]],
+    regression_rows: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     labels = paper_review_labels()
+    rows_by_id = {str(row["noisy_id"]): row for row in strong_examples}
+    next_rank = len(strong_examples) + 1
+    for row in regression_rows:
+        noisy_id = str(row["noisy_id"])
+        if noisy_id in rows_by_id:
+            continue
+        if labels.get(noisy_id, {}).get("paper_include") != "yes":
+            continue
+        rows_by_id[noisy_id] = strong_failure_example_row(row, next_rank)
+        next_rank += 1
+
     rows = []
-    for row in strong_examples:
+    for row in sorted(rows_by_id.values(), key=lambda item: int(item["rank"])):
         label = labels.get(
             str(row["noisy_id"]),
             {
@@ -805,9 +834,37 @@ def is_likely_real_regression(row: dict[str, object]) -> bool:
     )
 
 
-def article_dimension_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def manually_excluded_from_article(
+    row: dict[str, object], labels: dict[str, dict[str, str]]
+) -> bool:
+    judgment = labels.get(str(row["noisy_id"]), {}).get("human_judgment", "")
+    return judgment in {"artifact", "questionable"}
+
+
+def is_article_regression(
+    row: dict[str, object], labels: dict[str, dict[str, str]]
+) -> bool:
+    return is_likely_real_regression(row) and not manually_excluded_from_article(row, labels)
+
+
+def article_dimension_rows(
+    rows: list[dict[str, object]],
+    regression_rows: list[dict[str, object]],
+    labels: dict[str, dict[str, str]],
+) -> list[dict[str, object]]:
+    review_excluded_counts: dict[str, int] = {}
+    for row in regression_rows:
+        if is_likely_real_regression(row) and manually_excluded_from_article(row, labels):
+            dimension = str(row["dimension"])
+            review_excluded_counts[dimension] = review_excluded_counts.get(dimension, 0) + 1
+
     article_rows = []
     for row in rows:
+        automatic_count = int(row["real_model_regression_count"])
+        review_excluded_count = review_excluded_counts.get(str(row["dimension"]), 0)
+        article_count = automatic_count - review_excluded_count
+        automatic_rate = float(row["real_model_regression_rate_given_clean_success"])
+        clean_successes = automatic_count / automatic_rate if automatic_rate else 0
         article_rows.append(
             {
                 "dimension": row["dimension"],
@@ -819,16 +876,18 @@ def article_dimension_rows(rows: list[dict[str, object]]) -> list[dict[str, obje
                 "possible_oracle_issue_regressions": row[
                     "possible_oracle_issue_regressions"
                 ],
-                "real_model_regression_count": row["real_model_regression_count"],
-                "real_model_regression_rate_given_clean_success": row[
-                    "real_model_regression_rate_given_clean_success"
-                ],
+                "automatic_real_model_regression_count": automatic_count,
+                "review_excluded_regression_count": review_excluded_count,
+                "article_regression_count": article_count,
+                "article_regression_rate_given_clean_success": (
+                    article_count / clean_successes if clean_successes else 0.0
+                ),
             }
         )
     return sorted(
         article_rows,
         key=lambda row: (
-            -float(row["real_model_regression_rate_given_clean_success"]),
+            -float(row["article_regression_rate_given_clean_success"]),
             -float(row["absolute_degradation"]),
         ),
     )
@@ -837,10 +896,11 @@ def article_dimension_rows(rows: list[dict[str, object]]) -> list[dict[str, obje
 def grouped_article_count_rows(
     regression_rows: list[dict[str, object]],
     group_key: str,
+    labels: dict[str, dict[str, str]],
 ) -> list[dict[str, object]]:
     counts: dict[tuple[str, str], int] = {}
     for row in regression_rows:
-        if not is_likely_real_regression(row):
+        if not is_article_regression(row, labels):
             continue
         key = (str(row["dimension"]), str(row[group_key]))
         counts[key] = counts.get(key, 0) + 1
@@ -848,7 +908,7 @@ def grouped_article_count_rows(
         {
             "dimension": dimension,
             group_key: value,
-            "likely_real_regression_count": count,
+            "article_regression_count": count,
         }
         for (dimension, value), count in sorted(
             counts.items(),
@@ -860,17 +920,18 @@ def grouped_article_count_rows(
 def overall_article_count_rows(
     regression_rows: list[dict[str, object]],
     group_key: str,
+    labels: dict[str, dict[str, str]],
 ) -> list[dict[str, object]]:
     counts: dict[str, int] = {}
     for row in regression_rows:
-        if not is_likely_real_regression(row):
+        if not is_article_regression(row, labels):
             continue
         value = str(row[group_key])
         counts[value] = counts.get(value, 0) + 1
     return [
         {
             group_key: value,
-            "likely_real_regression_count": count,
+            "article_regression_count": count,
         }
         for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     ]
@@ -883,8 +944,9 @@ def write_article_bundle(
 ) -> None:
     article_dir = REPO_ROOT / "artifacts/analysis/article"
     article_dir.mkdir(parents=True, exist_ok=True)
+    labels = paper_review_labels()
 
-    dimension_rows = article_dimension_rows(benchmark_rows)
+    dimension_rows = article_dimension_rows(benchmark_rows, regression_rows, labels)
     dimension_fieldnames = [
         "dimension",
         "total",
@@ -893,33 +955,37 @@ def write_article_bundle(
         "absolute_degradation",
         "raw_regression_count",
         "possible_oracle_issue_regressions",
-        "real_model_regression_count",
-        "real_model_regression_rate_given_clean_success",
+        "automatic_real_model_regression_count",
+        "review_excluded_regression_count",
+        "article_regression_count",
+        "article_regression_rate_given_clean_success",
     ]
     write_csv(article_dir / "dimension_results.csv", dimension_rows, dimension_fieldnames)
 
-    error_type_rows = grouped_article_count_rows(regression_rows, "manual_error_type")
+    error_type_rows = grouped_article_count_rows(
+        regression_rows, "manual_error_type", labels
+    )
     write_csv(
         article_dir / "error_type_counts.csv",
         error_type_rows,
-        ["dimension", "manual_error_type", "likely_real_regression_count"],
+        ["dimension", "manual_error_type", "article_regression_count"],
     )
     write_csv(
         article_dir / "overall_error_type_counts.csv",
-        overall_article_count_rows(regression_rows, "manual_error_type"),
-        ["manual_error_type", "likely_real_regression_count"],
+        overall_article_count_rows(regression_rows, "manual_error_type", labels),
+        ["manual_error_type", "article_regression_count"],
     )
 
-    category_rows = grouped_article_count_rows(regression_rows, "category")
+    category_rows = grouped_article_count_rows(regression_rows, "category", labels)
     write_csv(
         article_dir / "category_counts.csv",
         category_rows,
-        ["dimension", "category", "likely_real_regression_count"],
+        ["dimension", "category", "article_regression_count"],
     )
     write_csv(
         article_dir / "overall_category_counts.csv",
-        overall_article_count_rows(regression_rows, "category"),
-        ["category", "likely_real_regression_count"],
+        overall_article_count_rows(regression_rows, "category", labels),
+        ["category", "article_regression_count"],
     )
 
     oracle_rows = [row for row in regression_rows if row["oracle_issue"] == "possible"]
@@ -981,13 +1047,13 @@ def write_article_bundle(
         "",
         "These files organize the full-pool gpt-5.4-nano evaluation for article writing.",
         (
-            "Adjusted counts exclude rows marked as possible oracle, augmentation, "
-            "or baseline dataset issues."
+            "Article counts exclude rows marked as possible oracle, augmentation, "
+            "or baseline dataset issues, plus manually reviewed artifact/questionable rows."
         ),
         "",
         "## Dimension Results",
         "",
-        "| Dimension | Clean acc. | Noisy acc. | Drop | Likely real regressions | Real rate |",
+        "| Dimension | Clean acc. | Noisy acc. | Drop | Article regressions | Article rate |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     for row in dimension_rows:
@@ -1000,8 +1066,8 @@ def write_article_bundle(
                 clean=float(row["clean_accuracy"]),
                 noisy=float(row["noisy_accuracy"]),
                 drop=float(row["absolute_degradation"]),
-                count=row["real_model_regression_count"],
-                rate=float(row["real_model_regression_rate_given_clean_success"]),
+                count=row["article_regression_count"],
+                rate=float(row["article_regression_rate_given_clean_success"]),
             )
         )
     summary_lines.extend(
@@ -1010,10 +1076,10 @@ def write_article_bundle(
             "## Files",
             "",
             "- `dimension_results.csv`: article-ready per-dimension metrics.",
-            "- `error_type_counts.csv`: likely real regressions by manual error type.",
-            "- `overall_error_type_counts.csv`: aggregate likely real regressions by error type.",
-            "- `category_counts.csv`: likely real regressions by BFCL category.",
-            "- `overall_category_counts.csv`: aggregate likely real regressions by BFCL category.",
+            "- `error_type_counts.csv`: article regressions by manual error type.",
+            "- `overall_error_type_counts.csv`: aggregate article regressions by error type.",
+            "- `category_counts.csv`: article regressions by BFCL category.",
+            "- `overall_category_counts.csv`: aggregate article regressions by BFCL category.",
             "- `candidate_failure_examples.csv`: strongest examples queued for human review.",
             "- `included_failure_examples.csv`: reviewed qualitative examples for the article.",
             (
@@ -1112,7 +1178,7 @@ def analyze() -> None:
             "noisy_prediction",
         ],
     )
-    paper_review_rows = paper_failure_review_rows(strong_examples)
+    paper_review_rows = paper_failure_review_rows(strong_examples, regression_rows)
     paper_failure_fieldnames = [
         "paper_include",
         "human_judgment",
