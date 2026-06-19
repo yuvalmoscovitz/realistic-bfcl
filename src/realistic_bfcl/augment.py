@@ -366,6 +366,46 @@ TYPO_REPLACEMENTS = (
     ("hypotenuse", "hypotnuse"),
 )
 
+TELEGRAPHIC_STOPWORDS = {
+    "a",
+    "about",
+    "am",
+    "an",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "being",
+    "can",
+    "could",
+    "does",
+    "for",
+    "given",
+    "have",
+    "how",
+    "i",
+    "is",
+    "it",
+    "me",
+    "my",
+    "need",
+    "of",
+    "please",
+    "show",
+    "the",
+    "there",
+    "to",
+    "using",
+    "want",
+    "what",
+    "where",
+    "which",
+    "with",
+    "would",
+    "you",
+}
+
 
 def lowercase_first_alpha(text: str) -> str:
     protected = quoted_literal_spans(text)
@@ -430,7 +470,14 @@ def span_overlaps(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
 def literal_spans(text: str, literal: str) -> list[tuple[int, int]]:
     if not literal:
         return []
-    return [match.span() for match in re.finditer(re.escape(literal), text, flags=re.IGNORECASE)]
+    return [match.span() for match in literal_regex(literal).finditer(text)]
+
+
+def literal_regex(literal: str) -> re.Pattern[str]:
+    literal_text = literal.strip().replace("_", " ")
+    parts = [part for part in re.split(r"\s+", literal_text) if part]
+    pattern = r"[^A-Za-z0-9]+".join(re.escape(part) for part in parts)
+    return re.compile(rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])", flags=re.IGNORECASE)
 
 
 def visible_gold_literal_spans(text: str, example: dict[str, object]) -> list[tuple[int, int]]:
@@ -488,9 +535,13 @@ def typo_prompt(
     return f"plese {lowercase_first_alpha(text)}"
 
 
-def removed_spaces_prompt(clean_prompt: str, index: int) -> str:
+def removed_spaces_prompt(
+    clean_prompt: str,
+    index: int,
+    protected_spans: list[tuple[int, int]] | None = None,
+) -> str:
     pairs = list(re.finditer(r"\b[A-Za-z]{2,}\s+[A-Za-z]{2,}\b", clean_prompt))
-    protected = quoted_literal_spans(clean_prompt)
+    protected = quoted_literal_spans(clean_prompt) + (protected_spans or [])
     pairs = [match for match in pairs if not span_overlaps(match.span(), protected)]
     if not pairs:
         return clean_prompt
@@ -500,6 +551,82 @@ def removed_spaces_prompt(clean_prompt: str, index: int) -> str:
         + match.group(0).replace(" ", "", 1)
         + clean_prompt[match.end() :]
     )
+
+
+def replace_spans_with_placeholders(
+    text: str,
+    spans: list[tuple[int, int]],
+    prefix: str,
+) -> tuple[str, list[str]]:
+    protected_texts = []
+    selected_spans = []
+    for start, end in sorted(set(spans), key=lambda span: (-(span[1] - span[0]), span[0])):
+        overlaps_selected = any(
+            start < selected_end and end > selected_start
+            for selected_start, selected_end in selected_spans
+        )
+        if overlaps_selected:
+            continue
+        selected_spans.append((start, end))
+    filtered_spans = sorted(selected_spans)
+    for placeholder_index, (start, end) in enumerate(reversed(filtered_spans)):
+        protected_texts.insert(0, text[start:end])
+        value_index = len(filtered_spans) - placeholder_index - 1
+        text = f"{text[:start]}__{prefix}_{value_index}__{text[end:]}"
+    return text, protected_texts
+
+
+def restore_placeholders(text: str, values: list[str], prefix: str) -> str:
+    for value_index, value in enumerate(values):
+        text = text.replace(f"__{prefix}_{value_index}__", value)
+    return text
+
+
+def telegraphic_request_prompt(
+    clean_prompt: str,
+    index: int,
+    protected_spans: list[tuple[int, int]] | None = None,
+) -> str:
+    quoted = quoted_literals(clean_prompt)
+    stripped_prompt = clean_prompt.strip()
+    if len(quoted) > 6 or (
+        len(stripped_prompt) > 1
+        and stripped_prompt[0] in {"'", '"'}
+        and stripped_prompt[-1] == stripped_prompt[0]
+    ):
+        return clean_prompt
+    text = clean_prompt
+    text, protected_texts = replace_spans_with_placeholders(
+        text,
+        protected_spans or [],
+        "PROTECTED",
+    )
+    for quote_index, quoted_text in enumerate(quoted):
+        text = text.replace(quoted_text, f"__QUOTE_{quote_index}__", 1)
+    text = re.sub(r"[?,;:!]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    tokens = []
+    for token in text.split(" "):
+        stripped = token.strip()
+        if not stripped:
+            continue
+        if re.fullmatch(r"__(QUOTE|PROTECTED)_\d+__", stripped):
+            tokens.append(stripped)
+            continue
+        if len(stripped) == 1 and stripped.isupper() and stripped != "I":
+            tokens.append(stripped)
+            continue
+        normalized = stripped.lower().strip("()[]{}.")
+        if normalized in TELEGRAPHIC_STOPWORDS:
+            continue
+        tokens.append(stripped)
+    if len(tokens) < 3:
+        tokens = text.split(" ")
+    noisy_prompt = " ".join(tokens)
+    for quote_index, quoted_text in enumerate(quoted):
+        noisy_prompt = noisy_prompt.replace(f"__QUOTE_{quote_index}__", quoted_text)
+    noisy_prompt = restore_placeholders(noisy_prompt, protected_texts, "PROTECTED")
+    return noisy_prompt
 
 
 def transform_messages(question: object, index: int, transform: object) -> object:
@@ -537,7 +664,7 @@ def literal_visible_in_text(literal: object, text: str) -> bool:
     literal_text = str(literal).strip()
     if not literal_text:
         return False
-    return compact_text(literal_text) in compact_text(text)
+    return literal_regex(literal_text).search(text) is not None
 
 
 def validate_augmented_prompt(
@@ -612,6 +739,39 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
                 example["question"],
                 index,
                 protected_typo_prompt,
+            )
+        elif dimension == "removed_spaces":
+            clean_first_message = str(example["question"][0][0]["content"])
+            protected = visible_gold_literal_spans(clean_first_message, example)
+
+            def protected_removed_spaces_prompt(
+                prompt: str,
+                prompt_index: int,
+                protected_spans: list[tuple[int, int]] = protected,
+            ) -> str:
+                return removed_spaces_prompt(prompt, prompt_index, protected_spans)
+
+            question = transform_messages(
+                example["question"],
+                index,
+                protected_removed_spaces_prompt,
+            )
+        elif dimension == "telegraphic_request":
+            clean_first_message = str(example["question"][0][0]["content"])
+            protected = visible_gold_literal_spans(clean_first_message, example)
+            protected.extend(quoted_literal_spans(clean_first_message))
+
+            def protected_telegraphic_prompt(
+                prompt: str,
+                prompt_index: int,
+                protected_spans: list[tuple[int, int]] = protected,
+            ) -> str:
+                return telegraphic_request_prompt(prompt, prompt_index, protected_spans)
+
+            question = transform_messages(
+                example["question"],
+                index,
+                protected_telegraphic_prompt,
             )
         else:
             question = transform_messages(example["question"], index, transform)
@@ -694,6 +854,10 @@ def augment_pasted_context_block() -> None:
     augment_dimension("pasted_context_block", "pasted_context_block", pasted_context_block_prompt)
 
 
+def augment_telegraphic_request() -> None:
+    augment_dimension("telegraphic_request", "telegraphic_request", telegraphic_request_prompt)
+
+
 def augment() -> None:
     augment_typos()
     augment_cursing()
@@ -704,6 +868,7 @@ def augment() -> None:
     augment_argumentative_sandwich()
     augment_distractor_sandwich()
     augment_pasted_context_block()
+    augment_telegraphic_request()
     review_augmentations()
 
 
@@ -728,6 +893,7 @@ def review_augmentations() -> None:
         ("argumentative_sandwich", "aug_argumentative_sandwich"),
         ("distractor_sandwich", "aug_distractor_sandwich"),
         ("pasted_context_block", "aug_pasted_context_block"),
+        ("telegraphic_request", "aug_telegraphic_request"),
     )
     generated_by_dimension = {}
     for dimension, _column in dimensions:
@@ -755,6 +921,7 @@ def review_augmentations() -> None:
         "aug_argumentative_sandwich",
         "aug_distractor_sandwich",
         "aug_pasted_context_block",
+        "aug_telegraphic_request",
         "function_names",
         "ground_truth",
     ]

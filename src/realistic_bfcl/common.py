@@ -67,6 +67,7 @@ DIMENSION_FILES = {
     "argumentative_sandwich": "argumentative_sandwich.jsonl",
     "distractor_sandwich": "distractor_sandwich.jsonl",
     "pasted_context_block": "pasted_context_block.jsonl",
+    "telegraphic_request": "telegraphic_request.jsonl",
     "llm_work_context": "llm_work_context.jsonl",
     "llm_prior_thread": "llm_prior_thread.jsonl",
     "llm_conversation_history": "llm_conversation_history.jsonl",

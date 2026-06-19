@@ -74,7 +74,7 @@ single-turn pilot, run:
 REALISTIC_BFCL_SUBSET_CONFIG=configs/subsets/expanded_live.yaml make prepare-subset
 ```
 
-`augment` creates the frozen noisy dataset once. It currently writes nine
+`augment` creates the frozen noisy dataset once. It currently writes ten
 oracle-preserving dimensions:
 
 - `typos`
@@ -86,6 +86,7 @@ oracle-preserving dimensions:
 - `argumentative_sandwich`
 - `distractor_sandwich`
 - `pasted_context_block`
+- `telegraphic_request`
 
 It also writes `artifacts/generated/augmentation_review.csv` for human
 inspection. Deterministic invariant checks reject examples that alter numbers,

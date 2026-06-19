@@ -30,6 +30,7 @@ from .common import (
     file_sha256,
     openai_api_key,
     openai_concurrency,
+    optional_positive_int_env,
     read_int_setting,
     read_jsonl,
     read_list_setting,
@@ -638,6 +639,10 @@ def paired_eval_dimension(dimension: str) -> dict[str, object]:
         raise SystemExit("Missing clean model predictions. Run run-bfcl first.")
 
     noisy_examples = read_jsonl(noisy_path)
+    limit = optional_positive_int_env("REALISTIC_BFCL_EVAL_LIMIT")
+    if limit is not None:
+        noisy_examples = noisy_examples[:limit]
+        print(f"Limiting paired evaluation for {dimension} to {len(noisy_examples)} examples")
     clean_predictions = load_current_clean_predictions(
         clean_predictions_path,
         {str(noisy_example["base_id"]) for noisy_example in noisy_examples},

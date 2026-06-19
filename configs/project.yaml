@@ -29,6 +29,7 @@ generation:
     - argumentative_sandwich
     - distractor_sandwich
     - pasted_context_block
+    - telegraphic_request
   rejected_by_default:
     - adversarial_word_games
     - random_typos_without_human_plausibility

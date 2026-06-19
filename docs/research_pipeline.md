@@ -55,6 +55,7 @@ Current dimensions:
 - `argumentative_sandwich`
 - `distractor_sandwich`
 - `pasted_context_block`
+- `telegraphic_request`
 
 Primary outputs:
 - `artifacts/generated/*.jsonl`

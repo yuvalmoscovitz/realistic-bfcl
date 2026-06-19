@@ -152,3 +152,20 @@ dimensions:
       - adds a second actionable request
       - makes pasted entities, dates, locations, counts, or quoted values active constraints
       - changes any oracle-bearing text in the clean request
+
+  telegraphic_request:
+    status: pilot
+    description: Compress the clean request into casual keyword-style input while preserving oracle-bearing values.
+    must_preserve:
+      - function_name
+      - all_required_arguments
+      - argument_values
+      - tool_schema
+    allowed_noise:
+      - dropped articles, politeness, and filler words
+      - punctuation removal
+      - terse keyword ordering from the original request
+    rejection_rules:
+      - removes required argument values
+      - removes quoted strings, numbers, dates, or explicit entities
+      - changes the requested action or makes multiple actions ambiguous
