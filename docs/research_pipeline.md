@@ -51,12 +51,50 @@ Current dimensions:
 - `irrelevant_context`
 - `removed_spaces`
 - `argumentative_challenge`
+- `profane_sandwich`
+- `argumentative_sandwich`
+- `distractor_sandwich`
+- `pasted_context_block`
+- `telegraphic_request`
 
 Primary outputs:
 - `artifacts/generated/*.jsonl`
 - `artifacts/generated/augmentation_review.csv`
 
 The JSONL files are evaluator-ready. The CSV is for human inspection only.
+
+LLM-generated pilot dimensions are generated separately:
+
+```bash
+python scripts/run_stage.py augment-llm-pilot
+```
+
+Current LLM dimensions:
+- `llm_work_context`
+- `llm_prior_thread`
+- `llm_conversation_history`
+- `llm_messy_pre_intent_history`
+- `llm_profane_frustration`
+- `llm_argumentative_challenge`
+- `llm_frustrated_distractor_context`
+
+`llm_messy_pre_intent_history` models semi-relevant chat before the user has a
+specific intent. The generator creates only the pre-final turns; the final user
+turn is appended deterministically from the clean BFCL request. Good distractors
+are concrete but abandoned alternatives, stale values, prior assistant guesses,
+workflow context, and mild frustration, such as maybe visiting family in Idaho
+before a separate New York-to-Boston bus request. Pre-final turns may overlap
+with the final request when that is natural, but they must not add active
+constraints that conflict with or narrow the final request.
+
+`llm_profane_frustration` and `llm_argumentative_challenge` are single-turn tone
+dimensions. They keep the clean request embedded verbatim and only add realistic
+frustration, profanity, skepticism, or pressure around it.
+
+`llm_frustrated_distractor_context` combines the strongest simple ingredients:
+strong tone and one explicitly inactive distractor before the exact clean
+request. It is intended to test whether models overfit nearby context even when
+the current ask is still verbatim and unambiguous.
 
 ## 3. Run BFCL-Style Evaluation
 

@@ -30,6 +30,7 @@ from .common import (
     file_sha256,
     openai_api_key,
     openai_concurrency,
+    optional_positive_int_env,
     read_int_setting,
     read_jsonl,
     read_list_setting,
@@ -628,16 +629,27 @@ def generated_dimensions() -> list[str]:
 def paired_eval_dimension(dimension: str) -> dict[str, object]:
     noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
     clean_predictions_path = REPO_ROOT / f"artifacts/results/clean/{OPENAI_MODEL}_predictions.jsonl"
-    noisy_predictions_path = (
-        REPO_ROOT / f"artifacts/results/noisy/{dimension}/{OPENAI_MODEL}_predictions.jsonl"
-    )
-    paired_path = REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
-    summary_path = REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_summary.json"
+    limit = optional_positive_int_env("REALISTIC_BFCL_EVAL_LIMIT")
+    result_suffix = f"limit_{limit}" if limit is not None else ""
+    noisy_results_dir = REPO_ROOT / f"artifacts/results/noisy/{dimension}"
+    paired_results_dir = REPO_ROOT / f"artifacts/results/paired/{dimension}"
+    if result_suffix:
+        noisy_results_dir = noisy_results_dir / result_suffix
+        paired_results_dir = paired_results_dir / result_suffix
+    noisy_predictions_path = noisy_results_dir / f"{OPENAI_MODEL}_predictions.jsonl"
+    paired_path = paired_results_dir / f"{OPENAI_MODEL}_paired.jsonl"
+    summary_path = paired_results_dir / f"{OPENAI_MODEL}_summary.json"
 
     if not clean_predictions_path.exists():
         raise SystemExit("Missing clean model predictions. Run run-bfcl first.")
 
     noisy_examples = read_jsonl(noisy_path)
+    if limit is not None:
+        noisy_examples = noisy_examples[:limit]
+        print(
+            f"Limiting paired evaluation for {dimension} to {len(noisy_examples)} "
+            f"examples under {result_suffix}"
+        )
     clean_predictions = load_current_clean_predictions(
         clean_predictions_path,
         {str(noisy_example["base_id"]) for noisy_example in noisy_examples},
@@ -676,6 +688,7 @@ def paired_eval_dimension(dimension: str) -> dict[str, object]:
             "clean_predictions": clean_predictions_path.relative_to(REPO_ROOT).as_posix(),
             "noisy_predictions": noisy_predictions_path.relative_to(REPO_ROOT).as_posix(),
             "paired_results": paired_path.relative_to(REPO_ROOT).as_posix(),
+            "eval_limit": limit,
             "metrics": metrics,
             "noisy_metrics": noisy_accuracy,
         },
@@ -693,13 +706,20 @@ def paired_eval() -> None:
     dimensions = generated_dimensions()
     if not dimensions:
         raise SystemExit("No generated noisy dimensions found. Run augment first.")
+    limit = optional_positive_int_env("REALISTIC_BFCL_EVAL_LIMIT")
+    summary_name = (
+        f"{OPENAI_MODEL}_summary_limit_{limit}.json"
+        if limit is not None
+        else f"{OPENAI_MODEL}_summary.json"
+    )
     summaries = [paired_eval_dimension(dimension) for dimension in dimensions]
     write_json(
-        REPO_ROOT / f"artifacts/results/paired/{OPENAI_MODEL}_summary.json",
+        REPO_ROOT / f"artifacts/results/paired/{summary_name}",
         {
             "created_at": utc_now(),
             "stage": "run-bfcl",
             "model": OPENAI_MODEL,
+            "eval_limit": limit,
             "dimensions": summaries,
         },
     )

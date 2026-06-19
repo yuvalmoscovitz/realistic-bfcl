@@ -63,9 +63,18 @@ DIMENSION_FILES = {
     "irrelevant_context": "irrelevant_context.jsonl",
     "removed_spaces": "removed_spaces.jsonl",
     "argumentative_challenge": "argumentative_challenge.jsonl",
+    "profane_sandwich": "profane_sandwich.jsonl",
+    "argumentative_sandwich": "argumentative_sandwich.jsonl",
+    "distractor_sandwich": "distractor_sandwich.jsonl",
+    "pasted_context_block": "pasted_context_block.jsonl",
+    "telegraphic_request": "telegraphic_request.jsonl",
     "llm_work_context": "llm_work_context.jsonl",
     "llm_prior_thread": "llm_prior_thread.jsonl",
     "llm_conversation_history": "llm_conversation_history.jsonl",
+    "llm_messy_pre_intent_history": "llm_messy_pre_intent_history.jsonl",
+    "llm_profane_frustration": "llm_profane_frustration.jsonl",
+    "llm_argumentative_challenge": "llm_argumentative_challenge.jsonl",
+    "llm_frustrated_distractor_context": "llm_frustrated_distractor_context.jsonl",
 }
 
 

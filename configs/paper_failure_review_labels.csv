@@ -29,3 +29,25 @@ parallel_163__cursing,no,strong_failure,Less clean due probability percent conve
 parallel_115__context,no,strong_failure,Duplicate of selected genetics example.
 parallel_69__spaces,no,questionable,Removed-space edit is not visually clear enough.
 parallel_159__typos,yes,strong_failure,Drops two of three dice-probability calls.
+live_parallel_multiple_6-5-0__argue,no,strong_failure,Duplicate of selected interviewer lookup failure.
+live_parallel_9-5-0__cursing,yes,strong_failure,Drops the 4 GB AWS pricing lookup.
+live_parallel_9-5-0__pasted_context_block,no,strong_failure,Duplicate of selected AWS pricing failure.
+live_parallel_multiple_7-6-0__spaces,no,questionable,Removed-space edit changes all clouds into allclouds.
+live_parallel_multiple_6-5-0__telegraphic_request,yes,strong_failure,Drops the Java interviewer lookup from a terse request.
+live_multiple_183-78-0__argue,yes,strong_failure,Routes translation through a different tool after argumentative phrasing.
+live_multiple_1000-231-0__cursing,yes,strong_failure,Routes a specific maintenance config lookup to a list endpoint.
+live_multiple_125-47-1__context,no,questionable,Clean prompt is dominated by embedded tool instructions.
+live_multiple_125-47-1__pasted_context_block,yes,strong_failure,Routes multiply to add after messy pasted preamble.
+live_multiple_183-78-0__spaces,no,questionable,Translation tool alias makes this less crisp.
+live_multiple_1000-231-0__telegraphic_request,yes,strong_failure,Routes a terse specific maintenance config lookup to a list endpoint.
+live_multiple_1000-231-0__typos,no,strong_failure,Duplicate of selected maintenance config failure.
+parallel_41__pasted_context_block,yes,strong_failure,Splits two shop-location calls into redundant instrument-specific calls.
+live_multiple_358-134-3__telegraphic_request,no,questionable,Extra movie search may be prompted by the wording.
+live_multiple_101-42-5__argue,yes,strong_failure,Changes retry attempts from the default to one.
+live_multiple_1018-247-0__cursing,no,questionable,Include-details argument is semantically debatable.
+live_multiple_113-44-0__context,no,questionable,MTNA versus Rich Data Services creates baseline ambiguity.
+live_multiple_113-44-0__pasted_context_block,no,questionable,MTNA versus Rich Data Services creates baseline ambiguity.
+live_multiple_1018-247-0__spaces,no,questionable,Include-details argument is semantically debatable.
+live_multiple_113-44-0__telegraphic_request,no,questionable,MTNA versus Rich Data Services creates baseline ambiguity.
+live_multiple_113-44-0__typos,no,questionable,MTNA versus Rich Data Services creates baseline ambiguity.
+live_parallel_multiple_6-5-0__cursing,no,strong_failure,Duplicate of selected interviewer lookup failure.

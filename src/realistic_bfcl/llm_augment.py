@@ -31,6 +31,8 @@ class LlmDimension:
     name: str
     suffix: str
     instruction: str
+    require_final_clean_prompt: bool = False
+    append_final_clean_prompt: bool = False
 
 
 LLM_DIMENSIONS = (
@@ -63,6 +65,73 @@ LLM_DIMENSIONS = (
             "original request and must determine the tool call."
         ),
     ),
+    LlmDimension(
+        name="llm_messy_pre_intent_history",
+        suffix="llm_pre_intent",
+        instruction=(
+            "Create only the messy multi-turn chat before the final user turn. Make it "
+            "look like a real production conversation where the user is arriving at the "
+            "request through surrounding work, planning, troubleshooting, or personal "
+            "context. Use 5-9 turns total before the final request. Include semi-relevant "
+            "details, stale alternatives, mild frustration, casual wording, and one or two "
+            "concrete distractor entities or values that are explicitly abandoned, "
+            "hypothetical, or background. The chat should be harder than a clean rewrite: "
+            "there can be prior assistant suggestions, half-decisions, side concerns, and "
+            "context that sounds important but is not the final ask. Earlier turns may "
+            "overlap with the eventual request when realistic, but must not add active "
+            "constraints that conflict with or narrow that eventual request. Do not include "
+            "the final user request; the benchmark code will append it deterministically."
+        ),
+        require_final_clean_prompt=True,
+        append_final_clean_prompt=True,
+    ),
+    LlmDimension(
+        name="llm_profane_frustration",
+        suffix="llm_profane",
+        instruction=(
+            "Create one realistic user message where the user is casually frustrated "
+            "and uses everyday profanity, but still makes the same request. The message "
+            "must include at least one natural profanity such as fuck, fucking, shit, "
+            "bullshit, goddamn, or ffs. The message must contain "
+            "final_clean_user_message exactly as written as the actionable request. Add "
+            "only tone around it: profanity, irritation, filler, or mild complaining. Do "
+            "not paraphrase, shorten, translate, or modify the embedded request. Do not "
+            "add any new active constraints."
+        ),
+        require_final_clean_prompt=True,
+    ),
+    LlmDimension(
+        name="llm_argumentative_challenge",
+        suffix="llm_argue",
+        instruction=(
+            "Create one realistic user message where the user challenges the assistant, "
+            "sounds skeptical, or says it got things wrong before. The message must contain "
+            "final_clean_user_message exactly as written as the actionable request. Add "
+            "only argumentative tone around it, such as doubt, impatience, or pressure to "
+            "be correct. Do not paraphrase, shorten, translate, or modify the embedded "
+            "request. Do not add any new active constraints."
+        ),
+        require_final_clean_prompt=True,
+    ),
+    LlmDimension(
+        name="llm_frustrated_distractor_context",
+        suffix="llm_frustrated_context",
+        instruction=(
+            "Create one realistic user message with both emotional tone and distracting "
+            "context. The user should sound impatient, skeptical, or casually profane, "
+            "and should mention one concrete stale/background distractor from nearby work "
+            "or life that is explicitly not the current ask. The message must contain "
+            "final_clean_user_message exactly as written as the actionable request. Put "
+            "the distractor before the verbatim request and make it clearly inactive with "
+            "phrasing like ignore that, not what I need, unrelated, old note, stale, or "
+            "I changed my mind. Include strong tone such as profanity, 'you got this "
+            "wrong before', 'don't guess', or 'please be right this time'. Do not "
+            "paraphrase, shorten, translate, or modify the embedded request. Do not add "
+            "any new active constraints. The inactive distractor must not reuse exact "
+            "entities, IDs, quoted strings, or argument values from the final request."
+        ),
+        require_final_clean_prompt=True,
+    ),
 )
 
 SENSITIVE_SLOT_TERMS = {
@@ -90,6 +159,30 @@ PRESERVED_DIRECTIVE_TERMS = (
     "proper llm",
     "respond in json",
     "using your tools",
+)
+PROFANITY_TERMS = ("fuck", "fucking", "shit", "bullshit", "goddamn", "ffs")
+ARGUMENTATIVE_TONE_TERMS = (
+    "wrong before",
+    "don't guess",
+    "dont guess",
+    "do not guess",
+    "be right",
+    "right this time",
+    "messed",
+    "you keep",
+    "last time",
+)
+INACTIVE_CONTEXT_MARKERS = (
+    "ignore",
+    "unrelated",
+    "not what i need",
+    "not what i'm asking",
+    "old note",
+    "stale",
+    "background",
+    "abandoned",
+    "changed my mind",
+    "not the current",
 )
 
 
@@ -139,6 +232,18 @@ def schema_property_names(example: dict[str, object]) -> set[str]:
     return names
 
 
+def final_clean_user_message(example: dict[str, object]) -> str:
+    question = example.get("question", [])
+    conversations = question if isinstance(question, list) else []
+    messages = conversations[0] if conversations and isinstance(conversations[0], list) else []
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            content = str(message.get("content", ""))
+            if content.strip():
+                return content
+    return conversation_text(question)
+
+
 def forbidden_active_slot_terms(
     example: dict[str, object],
     clean_prompt: str,
@@ -158,6 +263,7 @@ def forbidden_active_slot_terms(
 def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> str:
     function_names = [function["name"] for function in example["function"]]
     clean_prompt = conversation_text(example["question"])
+    final_user_message = final_clean_user_message(example)
     forbidden_terms = forbidden_active_slot_terms(example, clean_prompt)
     return json.dumps(
         {
@@ -165,6 +271,9 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
             "dimension": dimension.name,
             "dimension_instruction": dimension.instruction,
             "clean_prompt": clean_prompt,
+            "final_clean_user_message": final_user_message,
+            "final_message_verbatim_required": dimension.require_final_clean_prompt,
+            "append_final_clean_prompt": dimension.append_final_clean_prompt,
             "gold_tool_calls": example["ground_truth"],
             "available_function_names": function_names,
             "forbidden_active_slot_terms": forbidden_terms,
@@ -181,6 +290,31 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "format, and tool-use wording when they appear in the clean prompt.",
                 "Do not disambiguate ambiguous entities, names, or locations unless the "
                 "clean prompt already disambiguates them.",
+                "When final_message_verbatim_required is true, the final user message "
+                "must contain final_clean_user_message exactly as written.",
+                "For llm_profane_frustration, llm_argumentative_challenge, and "
+                "llm_frustrated_distractor_context, return exactly one user message. "
+                "Put the final_clean_user_message verbatim inside that message.",
+                "For llm_profane_frustration, include at least one natural profanity "
+                "outside the verbatim final_clean_user_message.",
+                "For llm_frustrated_distractor_context, include one concrete distractor "
+                "before the verbatim request and explicitly mark it as inactive, stale, "
+                "background, unrelated, ignored, or abandoned. Also include strong tone: "
+                "either natural profanity or explicit skepticism/pressure to be correct. "
+                "The distractor must not reuse exact entities, IDs, quoted strings, or "
+                "argument values from final_clean_user_message.",
+                "When append_final_clean_prompt is true, do not include the final user "
+                "request in your output messages. Generate only the realistic pre-final "
+                "conversation; the final_clean_user_message will be appended by code.",
+                "For llm_messy_pre_intent_history, generate 5-9 pre-final turns. The "
+                "history should contain enough realistic context to distract routing: "
+                "stale choices, abandoned values, prior assistant guesses, workflow "
+                "context, or casual frustration. Do not make it a tidy clarification path.",
+                "When final_message_verbatim_required is true, pre-final turns may "
+                "mention the broad domain or tentative overlapping values if that is "
+                "realistic, but any different numbers, dates, names, locations, or "
+                "preferences must be clearly stale, abandoned, hypothetical, or "
+                "irrelevant before the final turn.",
                 "For multi-turn output, the final user message must be the actionable request.",
                 "Keep the text realistic, not adversarial puzzle text.",
                 "Do not mention BFCL, benchmark, oracle, gold, original request, "
@@ -236,8 +370,10 @@ def call_llm_augmenter(example: dict[str, object], dimension: LlmDimension) -> d
 def validate_llm_messages(
     example: dict[str, object],
     messages: list[dict[str, str]],
+    dimension: LlmDimension,
 ) -> list[str]:
     clean_prompt = conversation_text(example["question"])
+    final_user_message = final_clean_user_message(example)
     augmented_text = "\n".join(message["content"] for message in messages)
     lowered_text = augmented_text.lower()
     lowered_clean = clean_prompt.lower()
@@ -270,10 +406,75 @@ def validate_llm_messages(
                     f"{term!r} for property {property_name!r}"
                 )
 
+    single_turn_dimensions = {
+        "llm_profane_frustration",
+        "llm_argumentative_challenge",
+        "llm_frustrated_distractor_context",
+    }
+    if dimension.name in single_turn_dimensions:
+        if len(messages) != 1:
+            reasons.append(f"{dimension.name} must return exactly one user message")
+        elif messages[0]["role"] != "user":
+            reasons.append(f"{dimension.name} must return a user message")
+    if dimension.name == "llm_profane_frustration" and not any(
+        term in lowered_text for term in PROFANITY_TERMS
+    ):
+        reasons.append("llm_profane_frustration must include profanity")
+    if dimension.name == "llm_frustrated_distractor_context":
+        has_strong_tone = any(term in lowered_text for term in PROFANITY_TERMS) or any(
+            term in lowered_text for term in ARGUMENTATIVE_TONE_TERMS
+        )
+        if not has_strong_tone:
+            reasons.append(
+                "llm_frustrated_distractor_context must include profanity or strong skepticism"
+            )
+        if not any(marker in lowered_text for marker in INACTIVE_CONTEXT_MARKERS):
+            reasons.append(
+                "llm_frustrated_distractor_context must explicitly mark distractors inactive"
+            )
+        if final_user_message in augmented_text:
+            prefix_text = augmented_text.split(final_user_message, 1)[0]
+            lowered_prefix = prefix_text.lower()
+            for quoted in quoted_literals(clean_prompt):
+                bare_quoted = quoted.strip("'\"").lower()
+                if bare_quoted and bare_quoted in lowered_prefix:
+                    reasons.append(
+                        "llm_frustrated_distractor_context prefix reused clean quoted "
+                        f"literal: {quoted!r}"
+                    )
+            for literal in primitive_gold_values(example["ground_truth"]):
+                if (
+                    isinstance(literal, str)
+                    and literal_visible_in_text(literal, clean_prompt)
+                    and literal_visible_in_text(literal, prefix_text)
+                ):
+                    reasons.append(
+                        "llm_frustrated_distractor_context prefix reused visible gold "
+                        f"literal: {literal!r}"
+                    )
+
     if not messages:
         reasons.append("augmentation returned no messages")
     elif messages[-1]["role"] != "user":
         reasons.append("final message is not a user turn")
+    elif (
+        dimension.require_final_clean_prompt
+        and final_user_message not in messages[-1]["content"]
+    ):
+        reasons.append("final user message must contain final clean user message verbatim")
+    if (
+        dimension.append_final_clean_prompt
+        and len(messages) > 1
+        and final_user_message in "\n".join(message["content"] for message in messages[:-1])
+    ):
+        reasons.append("pre-final turns already contain final clean user message")
+    if dimension.name == "llm_messy_pre_intent_history":
+        pre_final_messages = messages[:-1] if messages else []
+        if not 5 <= len(pre_final_messages) <= 9:
+            reasons.append(
+                "llm_messy_pre_intent_history must contain 5-9 messages before "
+                "the appended final request"
+            )
 
     meta_terms = (
         "bfcl",
@@ -331,7 +532,12 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
             except RuntimeError as error:
                 last_errors = [str(error)]
                 continue
-            validation_errors = validate_llm_messages(example, messages)
+            if dimension.append_final_clean_prompt:
+                messages = [
+                    *messages,
+                    {"role": "user", "content": final_clean_user_message(example)},
+                ]
+            validation_errors = validate_llm_messages(example, messages, dimension)
             if not validation_errors:
                 return {
                     "index": index,

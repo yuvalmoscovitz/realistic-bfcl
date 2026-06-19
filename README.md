@@ -74,7 +74,7 @@ single-turn pilot, run:
 REALISTIC_BFCL_SUBSET_CONFIG=configs/subsets/expanded_live.yaml make prepare-subset
 ```
 
-`augment` creates the frozen noisy dataset once. It currently writes five
+`augment` creates the frozen noisy dataset once. It currently writes ten
 oracle-preserving dimensions:
 
 - `typos`
@@ -82,10 +82,35 @@ oracle-preserving dimensions:
 - `irrelevant_context`
 - `removed_spaces`
 - `argumentative_challenge`
+- `profane_sandwich`
+- `argumentative_sandwich`
+- `distractor_sandwich`
+- `pasted_context_block`
+- `telegraphic_request`
 
 It also writes `artifacts/generated/augmentation_review.csv` for human
 inspection. Deterministic invariant checks reject examples that alter numbers,
 quoted strings, or visible gold argument values.
+
+`augment-llm-pilot` creates saved LLM-generated augmentation candidates for
+human review. It currently supports:
+
+- `llm_work_context`: one workplace-style message with irrelevant context.
+- `llm_prior_thread`: pasted stale ticket/thread plus the current request.
+- `llm_conversation_history`: short history with stale or discarded context.
+- `llm_messy_pre_intent_history`: semi-relevant pre-intent chat where the final
+  user turn is appended deterministically from the clean request. Earlier turns
+  are intentionally messy and distracting: stale alternatives, operational or
+  personal context, mild frustration, prior assistant guesses, and overlapping
+  details are allowed as long as they do not add active constraints that conflict
+  with the final request.
+- `llm_profane_frustration`: one user message with realistic frustration or
+  profanity around the exact clean request.
+- `llm_argumentative_challenge`: one user message with skeptical or challenging
+  tone around the exact clean request.
+- `llm_frustrated_distractor_context`: one user message that combines strong
+  tone and explicitly inactive distracting context around the exact clean
+  request.
 
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
 AST checker, cache, and parallel OpenAI calls.
