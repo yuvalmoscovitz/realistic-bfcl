@@ -797,6 +797,237 @@ def benchmark_summary_rows(
     return rows
 
 
+def is_likely_real_regression(row: dict[str, object]) -> bool:
+    return (
+        row["oracle_issue"] != "possible"
+        and row["augmentation_issue"] != "possible"
+        and row["baseline_dataset_issue"] != "possible"
+    )
+
+
+def article_dimension_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    article_rows = []
+    for row in rows:
+        article_rows.append(
+            {
+                "dimension": row["dimension"],
+                "total": row["total"],
+                "clean_accuracy": row["clean_accuracy"],
+                "noisy_accuracy": row["noisy_accuracy"],
+                "absolute_degradation": row["absolute_degradation"],
+                "raw_regression_count": row["raw_regression_count"],
+                "possible_oracle_issue_regressions": row[
+                    "possible_oracle_issue_regressions"
+                ],
+                "real_model_regression_count": row["real_model_regression_count"],
+                "real_model_regression_rate_given_clean_success": row[
+                    "real_model_regression_rate_given_clean_success"
+                ],
+            }
+        )
+    return sorted(
+        article_rows,
+        key=lambda row: (
+            -float(row["real_model_regression_rate_given_clean_success"]),
+            -float(row["absolute_degradation"]),
+        ),
+    )
+
+
+def grouped_article_count_rows(
+    regression_rows: list[dict[str, object]],
+    group_key: str,
+) -> list[dict[str, object]]:
+    counts: dict[tuple[str, str], int] = {}
+    for row in regression_rows:
+        if not is_likely_real_regression(row):
+            continue
+        key = (str(row["dimension"]), str(row[group_key]))
+        counts[key] = counts.get(key, 0) + 1
+    return [
+        {
+            "dimension": dimension,
+            group_key: value,
+            "likely_real_regression_count": count,
+        }
+        for (dimension, value), count in sorted(
+            counts.items(),
+            key=lambda item: (item[0][0], -item[1], item[0][1]),
+        )
+    ]
+
+
+def overall_article_count_rows(
+    regression_rows: list[dict[str, object]],
+    group_key: str,
+) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for row in regression_rows:
+        if not is_likely_real_regression(row):
+            continue
+        value = str(row[group_key])
+        counts[value] = counts.get(value, 0) + 1
+    return [
+        {
+            group_key: value,
+            "likely_real_regression_count": count,
+        }
+        for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def write_article_bundle(
+    benchmark_rows: list[dict[str, object]],
+    regression_rows: list[dict[str, object]],
+    paper_review_rows: list[dict[str, object]],
+) -> None:
+    article_dir = REPO_ROOT / "artifacts/analysis/article"
+    article_dir.mkdir(parents=True, exist_ok=True)
+
+    dimension_rows = article_dimension_rows(benchmark_rows)
+    dimension_fieldnames = [
+        "dimension",
+        "total",
+        "clean_accuracy",
+        "noisy_accuracy",
+        "absolute_degradation",
+        "raw_regression_count",
+        "possible_oracle_issue_regressions",
+        "real_model_regression_count",
+        "real_model_regression_rate_given_clean_success",
+    ]
+    write_csv(article_dir / "dimension_results.csv", dimension_rows, dimension_fieldnames)
+
+    error_type_rows = grouped_article_count_rows(regression_rows, "manual_error_type")
+    write_csv(
+        article_dir / "error_type_counts.csv",
+        error_type_rows,
+        ["dimension", "manual_error_type", "likely_real_regression_count"],
+    )
+    write_csv(
+        article_dir / "overall_error_type_counts.csv",
+        overall_article_count_rows(regression_rows, "manual_error_type"),
+        ["manual_error_type", "likely_real_regression_count"],
+    )
+
+    category_rows = grouped_article_count_rows(regression_rows, "category")
+    write_csv(
+        article_dir / "category_counts.csv",
+        category_rows,
+        ["dimension", "category", "likely_real_regression_count"],
+    )
+    write_csv(
+        article_dir / "overall_category_counts.csv",
+        overall_article_count_rows(regression_rows, "category"),
+        ["category", "likely_real_regression_count"],
+    )
+
+    oracle_rows = [row for row in regression_rows if row["oracle_issue"] == "possible"]
+    write_csv(
+        article_dir / "oracle_issue_examples.csv",
+        oracle_rows,
+        [
+            "review_status",
+            "manual_error_type",
+            "oracle_issue",
+            "augmentation_issue",
+            "baseline_dataset_issue",
+            "notes",
+            "base_id",
+            "noisy_id",
+            "category",
+            "dimension",
+            "heuristic_error_type",
+            "clean_prompt",
+            "noisy_prompt",
+            "gold",
+            "clean_prediction",
+            "noisy_prediction",
+        ],
+    )
+
+    paper_failure_fieldnames = [
+        "paper_include",
+        "human_judgment",
+        "short_explanation",
+        "rank",
+        "evidence_reason",
+        "base_id",
+        "noisy_id",
+        "category",
+        "dimension",
+        "manual_error_type",
+        "clean_prompt",
+        "noisy_prompt",
+        "gold",
+        "clean_prediction",
+        "noisy_prediction",
+    ]
+    write_csv(
+        article_dir / "included_failure_examples.csv",
+        [row for row in paper_review_rows if row["paper_include"] == "yes"],
+        paper_failure_fieldnames,
+    )
+    write_csv(
+        article_dir / "candidate_failure_examples.csv",
+        paper_review_rows,
+        paper_failure_fieldnames,
+    )
+
+    summary_lines = [
+        "# Realistic-BFCL Article Data",
+        "",
+        f"Generated at: {utc_now()}",
+        "",
+        "These files organize the full-pool gpt-5.4-nano evaluation for article writing.",
+        (
+            "Adjusted counts exclude rows marked as possible oracle, augmentation, "
+            "or baseline dataset issues."
+        ),
+        "",
+        "## Dimension Results",
+        "",
+        "| Dimension | Clean acc. | Noisy acc. | Drop | Likely real regressions | Real rate |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for row in dimension_rows:
+        summary_lines.append(
+            (
+                "| {dimension} | {clean:.3f} | {noisy:.3f} | {drop:.3f} "
+                "| {count} | {rate:.3f} |"
+            ).format(
+                dimension=row["dimension"],
+                clean=float(row["clean_accuracy"]),
+                noisy=float(row["noisy_accuracy"]),
+                drop=float(row["absolute_degradation"]),
+                count=row["real_model_regression_count"],
+                rate=float(row["real_model_regression_rate_given_clean_success"]),
+            )
+        )
+    summary_lines.extend(
+        [
+            "",
+            "## Files",
+            "",
+            "- `dimension_results.csv`: article-ready per-dimension metrics.",
+            "- `error_type_counts.csv`: likely real regressions by manual error type.",
+            "- `overall_error_type_counts.csv`: aggregate likely real regressions by error type.",
+            "- `category_counts.csv`: likely real regressions by BFCL category.",
+            "- `overall_category_counts.csv`: aggregate likely real regressions by BFCL category.",
+            "- `candidate_failure_examples.csv`: strongest examples queued for human review.",
+            "- `included_failure_examples.csv`: reviewed qualitative examples for the article.",
+            (
+                "- `oracle_issue_examples.csv`: examples to exclude or discuss as "
+                "evaluator/oracle ambiguity."
+            ),
+        ]
+    )
+    (article_dir / "README.md").write_text(
+        "\n".join(summary_lines) + "\n",
+        encoding="utf-8",
+    )
+
+
 def analyze() -> None:
     dimensions = [
         dimension
@@ -965,6 +1196,7 @@ def analyze() -> None:
             ).as_posix(),
         },
     )
+    write_article_bundle(benchmark_rows, regression_rows, paper_review_rows)
     print(f"Wrote {benchmark_summary_csv_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {benchmark_summary_json_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
@@ -972,3 +1204,4 @@ def analyze() -> None:
     print(f"Wrote {strong_failure_examples_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {paper_failure_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {paper_failure_examples_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {(REPO_ROOT / 'artifacts/analysis/article').relative_to(REPO_ROOT)}")
