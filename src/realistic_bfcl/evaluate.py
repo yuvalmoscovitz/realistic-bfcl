@@ -706,13 +706,20 @@ def paired_eval() -> None:
     dimensions = generated_dimensions()
     if not dimensions:
         raise SystemExit("No generated noisy dimensions found. Run augment first.")
+    limit = optional_positive_int_env("REALISTIC_BFCL_EVAL_LIMIT")
+    summary_name = (
+        f"{OPENAI_MODEL}_summary_limit_{limit}.json"
+        if limit is not None
+        else f"{OPENAI_MODEL}_summary.json"
+    )
     summaries = [paired_eval_dimension(dimension) for dimension in dimensions]
     write_json(
-        REPO_ROOT / f"artifacts/results/paired/{OPENAI_MODEL}_summary.json",
+        REPO_ROOT / f"artifacts/results/paired/{summary_name}",
         {
             "created_at": utc_now(),
             "stage": "run-bfcl",
             "model": OPENAI_MODEL,
+            "eval_limit": limit,
             "dimensions": summaries,
         },
     )
