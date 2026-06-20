@@ -9,7 +9,25 @@ multiple turns, correct themselves, type casually, sound impatient, mix
 languages, and omit words while remaining understandable. This project measures
 where tool routers fail under ordinary production-like conversational noise.
 
-## Core Claim
+## Minimal Example
+
+Clean BFCL prompt:
+
+```text
+What's cost of 2 and 4 GB RAM machine on AWS EC2 with one CPU?
+```
+
+Realistic noisy prompt:
+
+```text
+what's cost of 2 and 4 gb ram machine on aws ec2 with one CPU? fucking please man
+```
+
+The tool schema and gold answer are unchanged. The model should still call the
+same pricing tool twice: once for `2 GB` and once for `4 GB`. If it only calls
+the tool once, that is a paired clean-success/noisy-failure regression.
+
+## What This Tests
 
 BFCL provides the trusted deterministic evaluation substrate. Realistic-BFCL
 adds realistic conversational transformations on top of BFCL while preserving
@@ -32,12 +50,16 @@ We ran a 2,351-example BFCL-derived paired evaluation on `gpt-5.4-nano`.
 
 Clean accuracy was `0.761`. All seven realistic noise dimensions produced
 reviewed clean-success/noisy-failure regressions after oracle and manual-review
-filtering. Five of the seven also showed directional paired degradation under
-an uncorrected exact McNemar test.
+filtering.
 
 We repeated the evaluation three times with fresh clean and noisy model calls.
-Every noise type degraded accuracy in every run. The largest mean drops came
-from `pasted_context_block`, `cursing`, and `telegraphic_request`.
+Every noise type degraded accuracy in every run. The drops are small, but the
+direction is consistent for this model. This is a probe, not a leaderboard: the
+point is that oracle-preserving realistic rewrites expose failures hidden by
+clean prompts.
+
+This repository currently supports a problem-posing article, not a complete
+multi-model benchmark paper.
 
 See [docs/findings.md](docs/findings.md) for the GitHub-facing research note,
 examples, tables, and implications.
@@ -94,7 +116,7 @@ single-turn pilot, run:
 REALISTIC_BFCL_SUBSET_CONFIG=configs/subsets/expanded_live.yaml make prepare-subset
 ```
 
-`augment` creates the frozen noisy dataset once. It currently writes ten
+`augment` creates the frozen noisy dataset once. It can generate ten implemented
 oracle-preserving dimensions:
 
 - `typos`
@@ -107,6 +129,9 @@ oracle-preserving dimensions:
 - `distractor_sandwich`
 - `pasted_context_block`
 - `telegraphic_request`
+
+The current article-facing analysis uses the seven reviewed dimensions listed in
+[docs/findings.md](docs/findings.md).
 
 It also writes `artifacts/generated/augmentation_review.csv` for human
 inspection. Deterministic invariant checks reject examples that alter numbers,

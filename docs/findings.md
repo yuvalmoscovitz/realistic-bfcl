@@ -85,17 +85,15 @@ The drops are not huge.
 
 But that is not the interesting part.
 
-The interesting part is that these are paired examples. We can see both
-directions: clean prompts that broke under noise, and clean failures that
-recovered under noise. That matters because otherwise we might confuse
-directional degradation with ordinary stochastic churn.
+The interesting part is that these are paired examples. The same base example
+can succeed when written cleanly and fail when written more like real user
+traffic. That is the failure surface this project is trying to expose.
 
-For five of the seven dimensions, the exact McNemar test is below an
-uncorrected `0.05`. With Bonferroni correction across seven tested dimensions,
-`pasted_context_block` and `cursing` remain below `0.05`. With
-Benjamini-Hochberg FDR at `q = 0.05`, the first four dimensions remain below the
-threshold. `argumentative_challenge`, `removed_spaces`, and `typos` still
-produce reviewed failures, but the paired flip asymmetry is weaker.
+The paired statistics are a sanity check, not the main claim. The exact
+percentage drop is less important than the existence of reviewed
+clean-success/noisy-failure examples under oracle-preserving rewrites. The full
+paired counts, McNemar p-values, and multiple-comparison corrections are in
+`artifacts/analysis/article/paired_stats.csv`.
 
 We also repeated the evaluation three times with fresh clean and noisy model
 calls. The direction held in every run: each noise type reduced accuracy each
@@ -122,6 +120,9 @@ So the table is trying to answer a conservative question:
 ```text
 How often did ordinary prompt messiness break a tool call that already worked?
 ```
+
+This small study is a probe, not a leaderboard. Its purpose is to expose a
+failure surface and motivate more realistic robustness testing for tool routers.
 
 ## What The Failures Look Like
 
