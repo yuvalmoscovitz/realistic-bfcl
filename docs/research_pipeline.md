@@ -115,6 +115,8 @@ Primary outputs:
 - `artifacts/analysis/benchmark_summary.json`
 - `artifacts/analysis/flip_review.csv`
 - `artifacts/analysis/regression_review.csv`
+- `artifacts/analysis/article_failure_review.csv`
+- `artifacts/analysis/article_failure_examples.csv`
 
 GitHub-facing article outputs are written under:
 

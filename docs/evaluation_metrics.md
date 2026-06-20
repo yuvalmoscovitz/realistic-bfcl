@@ -96,6 +96,8 @@ The main analysis stage writes:
 - `artifacts/analysis/benchmark_summary.json`
 - `artifacts/analysis/regression_review.csv`
 - `artifacts/analysis/flip_review.csv`
+- `artifacts/analysis/article_failure_review.csv`
+- `artifacts/analysis/article_failure_examples.csv`
 
 The GitHub-facing findings note uses article artifacts under:
 
