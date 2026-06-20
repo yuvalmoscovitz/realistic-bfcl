@@ -67,23 +67,29 @@ Clean accuracy on this pool was `76.1%`.
 
 Here is what happened after adding each kind of noise:
 
-| Noise type | Clean acc. | Noisy acc. | Drop | Reviewed regressions |
-|---|---:|---:|---:|---:|
-| `telegraphic_request` | 0.761 | 0.746 | 0.014 | 75 |
-| `pasted_context_block` | 0.761 | 0.742 | 0.019 | 74 |
-| `cursing` | 0.761 | 0.744 | 0.017 | 67 |
-| `irrelevant_context` | 0.761 | 0.749 | 0.012 | 58 |
-| `argumentative_challenge` | 0.761 | 0.751 | 0.010 | 54 |
-| `typos` | 0.761 | 0.758 | 0.003 | 45 |
-| `removed_spaces` | 0.761 | 0.753 | 0.008 | 41 |
+| Noise type | Clean acc. | Noisy acc. | Drop | Clean ok -> noisy fail | Clean fail -> noisy ok | McNemar p |
+|---|---:|---:|---:|---:|---:|---:|
+| `pasted_context_block` | 0.761 | 0.742 | 0.019 | 96 | 51 | 0.0003 |
+| `cursing` | 0.761 | 0.744 | 0.017 | 97 | 58 | 0.0022 |
+| `telegraphic_request` | 0.761 | 0.746 | 0.014 | 98 | 64 | 0.0093 |
+| `irrelevant_context` | 0.761 | 0.749 | 0.012 | 84 | 56 | 0.0222 |
+| `argumentative_challenge` | 0.761 | 0.751 | 0.010 | 76 | 52 | 0.0416 |
+| `removed_spaces` | 0.761 | 0.753 | 0.008 | 76 | 57 | 0.1182 |
+| `typos` | 0.761 | 0.758 | 0.003 | 67 | 60 | 0.5946 |
 
 The drops are not huge.
 
 But that is not the interesting part.
 
-The interesting part is that these are paired examples. The model got the clean
-prompt right and then got the noisy version wrong, even though the intended tool
-call did not change.
+The interesting part is that these are paired examples. We can see both
+directions: clean prompts that broke under noise, and clean failures that
+recovered under noise. That matters because otherwise we might confuse
+directional degradation with ordinary stochastic churn.
+
+For five of the seven dimensions, the exact McNemar test is below `0.05`. For
+`removed_spaces` and `typos`, the result is weaker: the noisy prompt still
+produces reviewed failures, but the paired flip asymmetry is not strong enough to
+make the same statistical claim.
 
 Reviewed regressions exclude rows where the oracle looked ambiguous, the
 augmentation may have changed the task, or the example was manually questionable.
@@ -328,6 +334,8 @@ Main outputs:
 
 ```text
 artifacts/analysis/article/dimension_results.csv
+artifacts/analysis/article/paired_stats.csv
+artifacts/analysis/article/review_filtering.csv
 artifacts/analysis/article/overall_error_type_counts.csv
 artifacts/analysis/article/included_failure_examples.csv
 artifacts/analysis/article/oracle_issue_examples.csv

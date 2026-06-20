@@ -35,6 +35,21 @@ Clean-success/noisy-failure count:
 count(clean_correct and noisy_incorrect)
 ```
 
+Clean-failure/noisy-success count:
+
+```text
+count(clean_incorrect and noisy_correct)
+```
+
+Exact McNemar p-value:
+
+```text
+two-sided exact binomial test over the two discordant counts
+```
+
+This tests whether the paired flips are directionally asymmetric, rather than
+only reporting one side of the flip table.
+
 ## Paired Outcomes
 
 Each pair should be classified as:
@@ -105,3 +120,8 @@ The GitHub-facing findings note uses article artifacts under:
 - `artifacts/analysis/article/overall_error_type_counts.csv`
 - `artifacts/analysis/article/included_failure_examples.csv`
 - `artifacts/analysis/article/oracle_issue_examples.csv`
+- `artifacts/analysis/article/paired_stats.csv`
+- `artifacts/analysis/article/review_filtering.csv`
+
+These article-facing files are intentionally small and checked into the repo so
+readers can inspect the reported results without rerunning the model.

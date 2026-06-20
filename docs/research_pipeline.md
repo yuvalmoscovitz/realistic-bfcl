@@ -124,6 +124,8 @@ GitHub-facing article outputs are written under:
 - `artifacts/analysis/article/overall_error_type_counts.csv`
 - `artifacts/analysis/article/included_failure_examples.csv`
 - `artifacts/analysis/article/oracle_issue_examples.csv`
+- `artifacts/analysis/article/paired_stats.csv`
+- `artifacts/analysis/article/review_filtering.csv`
 
 ## Scaling Rule
 

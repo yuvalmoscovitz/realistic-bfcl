@@ -32,13 +32,18 @@ We ran a 2,351-example BFCL-derived paired evaluation on `gpt-5.4-nano`.
 
 Clean accuracy was `0.761`. All seven realistic noise dimensions produced
 reviewed clean-success/noisy-failure regressions after oracle and manual-review
-filtering.
+filtering. Five of the seven also showed directional paired degradation under
+an exact McNemar test.
 
 The strongest signals came from `telegraphic_request`, `pasted_context_block`,
 and `cursing`.
 
 See [docs/findings.md](docs/findings.md) for the GitHub-facing research note,
 examples, tables, and implications.
+
+The small article-facing analysis bundle is checked in under
+`artifacts/analysis/article/` for inspection. Larger generated datasets,
+predictions, and intermediate analysis files remain ignored.
 
 ## Repository Map
 

@@ -1,3 +1,8 @@
 *
 !.gitignore
 !README.md
+!analysis/
+analysis/*
+!analysis/article/
+!analysis/article/*.csv
+!analysis/article/README.md

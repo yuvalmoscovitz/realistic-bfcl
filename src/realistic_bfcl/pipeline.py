@@ -94,6 +94,8 @@ STAGES: tuple[Stage, ...] = (
             "artifacts/analysis/regression_review.csv",
             "artifacts/analysis/article_failure_review.csv",
             "artifacts/analysis/article_failure_examples.csv",
+            "artifacts/analysis/article/paired_stats.csv",
+            "artifacts/analysis/article/review_filtering.csv",
         ),
         next_action=(
             "Use adjusted regression metrics to decide whether the pilot is ready to scale."

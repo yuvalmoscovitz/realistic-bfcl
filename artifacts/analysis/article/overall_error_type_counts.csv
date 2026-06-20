@@ -1,0 +1,7 @@
+manual_error_type,article_regression_count
+wrong_argument_value,229
+missing_tool_call,115
+wrong_tool_routing,63
+extra_tool_call,5
+argument_drop,1
+malformed_call,1
