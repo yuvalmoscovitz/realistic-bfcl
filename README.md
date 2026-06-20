@@ -50,7 +50,6 @@ configs/
   subsets/expanded_live.yaml   Larger single-turn pilot with BFCL live categories.
 docs/
   findings.md                  GitHub-facing research note and current results.
-  paper_flow.md                Compact paper/story structure for the benchmark.
   research_pipeline.md         Research workflow and artifact contract.
   realism_contract.md          Validity rules and rejection criteria.
   evaluation_metrics.md        Paired metrics and error taxonomy.

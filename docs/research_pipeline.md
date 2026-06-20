@@ -4,10 +4,16 @@ Realistic-BFCL is a research benchmark layer, not a product pipeline. The
 repository should make the experimental artifact easy to reproduce:
 
 ```text
-BFCL clean subset -> frozen augmented dataset -> paired BFCL evaluation -> analysis
+prepare BFCL subset -> augment once -> run BFCL-style evaluation -> analyze
 ```
 
-## 1. Prepare The BFCL Substrate
+The repo has three core functions after the BFCL subset is prepared:
+
+1. `augment`: create the noisy dataset.
+2. `run-bfcl`: evaluate clean and noisy prompts.
+3. `analyze`: compute degradation and review artifacts.
+
+## 0. Prepare The BFCL Substrate
 
 Command:
 
@@ -32,7 +38,7 @@ Primary outputs:
 - `artifacts/frozen/bfcl_manifest.json`
 - `artifacts/frozen/clean_subset.jsonl`
 
-## 2. Construct The Augmented Dataset
+## 1. Augment
 
 Command:
 
@@ -63,7 +69,7 @@ Primary outputs:
 
 The JSONL files are evaluator-ready. The CSV is for human inspection only.
 
-LLM-generated pilot dimensions are generated separately:
+LLM-generated pilot dimensions are generated separately and saved for review:
 
 ```bash
 python scripts/run_stage.py augment-llm-pilot
@@ -96,7 +102,7 @@ strong tone and one explicitly inactive distractor before the exact clean
 request. It is intended to test whether models overfit nearby context even when
 the current ask is still verbatim and unambiguous.
 
-## 3. Run BFCL-Style Evaluation
+## 2. Run BFCL-Style Evaluation
 
 Command:
 
@@ -115,7 +121,7 @@ Primary outputs:
 - `artifacts/results/noisy/`
 - `artifacts/results/paired/`
 
-## 4. Analyze Paired Degradation
+## 3. Analyze
 
 Command:
 
@@ -134,9 +140,18 @@ Primary outputs:
 - `artifacts/analysis/flip_review.csv`
 - `artifacts/analysis/regression_review.csv`
 
+GitHub-facing article outputs are written under:
+
+- `artifacts/analysis/article/dimension_results.csv`
+- `artifacts/analysis/article/overall_error_type_counts.csv`
+- `artifacts/analysis/article/included_failure_examples.csv`
+- `artifacts/analysis/article/oracle_issue_examples.csv`
+
 ## Scaling Rule
 
-The 400-example stratified run is the smoke test. The next pilot uses
-`configs/subsets/expanded_live.yaml`, which keeps the original four categories
-and adds single-turn BFCL live categories that have gold answers. Add new models
-only after this expanded pilot is stable.
+The 400-example stratified run is smoke testing. The current article-facing run
+uses `configs/subsets/expanded_live.yaml`, which expands coverage to 2,351
+BFCL-derived examples with gold answers.
+
+For this project, widening the data and keeping the realism contract defensible
+is more important than adding many models or many more augmentation types.
