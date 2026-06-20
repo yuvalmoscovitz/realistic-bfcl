@@ -1,4 +1,4 @@
-noisy_id,paper_include,human_judgment,short_explanation
+noisy_id,article_include,human_judgment,short_explanation
 parallel_103__argue,yes,strong_failure,Drops the second chemistry setup.
 parallel_115__cursing,yes,strong_failure,Collapses four genetics calls to one.
 parallel_103__context,no,strong_failure,Duplicate of selected chemistry example.
