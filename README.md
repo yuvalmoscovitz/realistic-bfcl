@@ -26,6 +26,20 @@ The noisy prompt must preserve the original function name and arguments unless
 the transformation explicitly models correction or self-repair. In that case,
 the final oracle must be well-defined and derived from the clean oracle.
 
+## Current Findings
+
+We ran a 2,351-example BFCL-derived paired evaluation on `gpt-5.4-nano`.
+
+Clean accuracy was `0.761`. All seven realistic noise dimensions produced
+reviewed clean-success/noisy-failure regressions after oracle and manual-review
+filtering.
+
+The strongest signals came from `telegraphic_request`, `pasted_context_block`,
+and `cursing`.
+
+See [docs/findings.md](docs/findings.md) for the GitHub-facing research note,
+examples, tables, and implications.
+
 ## Repository Map
 
 ```text
@@ -35,7 +49,7 @@ configs/
   subsets/smoke.yaml           Current stratified clean subset definition.
   subsets/expanded_live.yaml   Larger single-turn pilot with BFCL live categories.
 docs/
-  paper_flow.md                Compact paper/story structure for the benchmark.
+  findings.md                  GitHub-facing research note and current results.
   research_pipeline.md         Research workflow and artifact contract.
   realism_contract.md          Validity rules and rejection criteria.
   evaluation_metrics.md        Paired metrics and error taxonomy.

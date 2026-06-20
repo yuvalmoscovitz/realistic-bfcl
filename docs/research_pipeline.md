@@ -4,10 +4,16 @@ Realistic-BFCL is a research benchmark layer, not a product pipeline. The
 repository should make the experimental artifact easy to reproduce:
 
 ```text
-BFCL clean subset -> frozen augmented dataset -> paired BFCL evaluation -> analysis
+prepare BFCL subset -> augment once -> run BFCL-style evaluation -> analyze
 ```
 
-## 1. Prepare The BFCL Substrate
+The repo has three core functions after the BFCL subset is prepared:
+
+1. `augment`: create the noisy dataset.
+2. `run-bfcl`: evaluate clean and noisy prompts.
+3. `analyze`: compute degradation and review artifacts.
+
+## 0. Prepare The BFCL Substrate
 
 Command:
 
@@ -32,7 +38,7 @@ Primary outputs:
 - `artifacts/frozen/bfcl_manifest.json`
 - `artifacts/frozen/clean_subset.jsonl`
 
-## 2. Construct The Augmented Dataset
+## 1. Augment
 
 Command:
 
@@ -63,40 +69,16 @@ Primary outputs:
 
 The JSONL files are evaluator-ready. The CSV is for human inspection only.
 
-LLM-generated pilot dimensions are generated separately:
+LLM-generated pilot dimensions are generated separately and saved for review:
 
 ```bash
 python scripts/run_stage.py augment-llm-pilot
 ```
 
-Current LLM dimensions:
-- `llm_work_context`
-- `llm_prior_thread`
-- `llm_conversation_history`
-- `llm_messy_pre_intent_history`
-- `llm_profane_frustration`
-- `llm_argumentative_challenge`
-- `llm_frustrated_distractor_context`
+These candidates are not part of the default article-facing run. They are for
+manual review before promotion into the main augmented dataset.
 
-`llm_messy_pre_intent_history` models semi-relevant chat before the user has a
-specific intent. The generator creates only the pre-final turns; the final user
-turn is appended deterministically from the clean BFCL request. Good distractors
-are concrete but abandoned alternatives, stale values, prior assistant guesses,
-workflow context, and mild frustration, such as maybe visiting family in Idaho
-before a separate New York-to-Boston bus request. Pre-final turns may overlap
-with the final request when that is natural, but they must not add active
-constraints that conflict with or narrow the final request.
-
-`llm_profane_frustration` and `llm_argumentative_challenge` are single-turn tone
-dimensions. They keep the clean request embedded verbatim and only add realistic
-frustration, profanity, skepticism, or pressure around it.
-
-`llm_frustrated_distractor_context` combines the strongest simple ingredients:
-strong tone and one explicitly inactive distractor before the exact clean
-request. It is intended to test whether models overfit nearby context even when
-the current ask is still verbatim and unambiguous.
-
-## 3. Run BFCL-Style Evaluation
+## 2. Run BFCL-Style Evaluation
 
 Command:
 
@@ -115,7 +97,7 @@ Primary outputs:
 - `artifacts/results/noisy/`
 - `artifacts/results/paired/`
 
-## 4. Analyze Paired Degradation
+## 3. Analyze
 
 Command:
 
@@ -126,7 +108,7 @@ python scripts/run_stage.py analyze
 Purpose:
 - Compare clean and noisy outcomes for the same base example.
 - Separate raw degradation from possible oracle/evaluator strictness issues.
-- Produce review files for manual audit and paper tables.
+- Produce review files for manual audit and article-facing summaries.
 
 Primary outputs:
 - `artifacts/analysis/benchmark_summary.csv`
@@ -134,9 +116,18 @@ Primary outputs:
 - `artifacts/analysis/flip_review.csv`
 - `artifacts/analysis/regression_review.csv`
 
+GitHub-facing article outputs are written under:
+
+- `artifacts/analysis/article/dimension_results.csv`
+- `artifacts/analysis/article/overall_error_type_counts.csv`
+- `artifacts/analysis/article/included_failure_examples.csv`
+- `artifacts/analysis/article/oracle_issue_examples.csv`
+
 ## Scaling Rule
 
-The 400-example stratified run is the smoke test. The next pilot uses
-`configs/subsets/expanded_live.yaml`, which keeps the original four categories
-and adds single-turn BFCL live categories that have gold answers. Add new models
-only after this expanded pilot is stable.
+The 400-example stratified run is smoke testing. The current article-facing run
+uses `configs/subsets/expanded_live.yaml`, which expands coverage to 2,351
+BFCL-derived examples with gold answers.
+
+For this project, widening the data and keeping the realism contract defensible
+is more important than adding many models or many more augmentation types.

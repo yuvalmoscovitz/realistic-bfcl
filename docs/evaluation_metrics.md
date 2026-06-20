@@ -1,7 +1,7 @@
 # Evaluation Metrics
 
 Realistic-BFCL uses paired clean-vs-noisy evaluation. The unit of analysis is a
-base BFCL example and one or more realistic noisy variants derived from it.
+base BFCL example and one realistic noisy variant derived from it.
 
 ## Core Metrics
 
@@ -29,6 +29,12 @@ Conditional failure rate given clean success:
 count(clean_correct and noisy_incorrect) / count(clean_correct)
 ```
 
+Clean-success/noisy-failure count:
+
+```text
+count(clean_correct and noisy_incorrect)
+```
+
 ## Paired Outcomes
 
 Each pair should be classified as:
@@ -42,9 +48,9 @@ The main scientific signal is `clean_success_noisy_failure`, because it
 isolates failures caused by realistic conversational noise rather than baseline
 tool-routing weakness.
 
-## Raw And Adjusted Degradation
+## Review Filtering
 
-Raw degradation counts every `clean_success_noisy_failure` row.
+Raw degradation counts every clean-success/noisy-failure row.
 
 Adjusted degradation excludes rows marked `oracle_issue=possible` in
 `artifacts/analysis/regression_review.csv`. This adjustment is meant to separate
@@ -60,37 +66,40 @@ The strongest model-failure count is `real_model_regression_count`. It excludes:
 These exclusions prevent benchmark artifacts from inflating the robustness
 claim.
 
+For the GitHub-facing findings note, the stricter reviewed set also excludes
+manually questionable examples from the article review artifacts.
+
 ## Error Taxonomy
 
 Noisy failures should be labeled with one primary category:
 
-- Routing error: wrong function name.
-- Argument drop: required argument missing.
-- Argument hallucination: extra or unsupported argument value.
-- Malformed call: invalid JSON or schema-incompatible call.
-- False refusal: model refuses despite a valid tool request.
-- Unnecessary clarification: model asks for information already present.
-- Baseline dataset ambiguity: the original BFCL prompt/schema/oracle requires an
-  unstated convention.
+- `wrong_tool_routing`: wrong function name.
+- `wrong_argument_value`: required argument has the wrong value.
+- `missing_tool_call`: one or more required tool calls are absent.
+- `extra_tool_call`: model emits a tool call not required by the oracle.
+- `argument_drop`: required argument is missing.
+- `argument_hallucination`: unsupported argument or unsupported value appears.
+- `malformed_call`: invalid JSON or schema-incompatible call.
+- `false_refusal`: model refuses despite a valid tool request.
+- `unnecessary_clarification`: model asks for information already present.
+- `baseline_dataset_ambiguity`: the original BFCL prompt/schema/oracle requires
+  an unstated convention.
 
 Secondary tags can be added later, but the first pass should keep labels small
 enough for consistent auditing.
 
-## Evidence Table
+## Main Outputs
 
-`artifacts/analysis/strong_failure_examples.csv` contains a compact qualitative
-sample of strong clean-success/noisy-failure regressions after excluding oracle,
-augmentation, and baseline dataset issues. This is the source table for manual
-inspection and paper examples.
+The main analysis stage writes:
 
-`artifacts/analysis/paper_failure_review.csv` adds first-pass human review
-columns:
+- `artifacts/analysis/benchmark_summary.csv`
+- `artifacts/analysis/benchmark_summary.json`
+- `artifacts/analysis/regression_review.csv`
+- `artifacts/analysis/flip_review.csv`
 
-- `paper_include`
-- `human_judgment`
-- `short_explanation`
+The GitHub-facing findings note uses article artifacts under:
 
-`artifacts/analysis/paper_failure_examples.csv` contains the reviewed rows
-marked for inclusion in the first paper evidence table.
-
-The editable review labels live in `configs/paper_failure_review_labels.csv`.
+- `artifacts/analysis/article/dimension_results.csv`
+- `artifacts/analysis/article/overall_error_type_counts.csv`
+- `artifacts/analysis/article/included_failure_examples.csv`
+- `artifacts/analysis/article/oracle_issue_examples.csv`
