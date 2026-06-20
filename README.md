@@ -35,8 +35,9 @@ reviewed clean-success/noisy-failure regressions after oracle and manual-review
 filtering. Five of the seven also showed directional paired degradation under
 an exact McNemar test.
 
-The strongest signals came from `telegraphic_request`, `pasted_context_block`,
-and `cursing`.
+We repeated the evaluation three times with fresh clean and noisy model calls.
+Every noise type degraded accuracy in every run. The largest mean drops came
+from `pasted_context_block`, `cursing`, and `telegraphic_request`.
 
 See [docs/findings.md](docs/findings.md) for the GitHub-facing research note,
 examples, tables, and implications.

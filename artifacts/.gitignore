@@ -5,4 +5,5 @@
 analysis/*
 !analysis/article/
 !analysis/article/*.csv
+!analysis/article/*.json
 !analysis/article/README.md

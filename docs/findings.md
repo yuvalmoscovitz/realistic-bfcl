@@ -91,6 +91,20 @@ For five of the seven dimensions, the exact McNemar test is below `0.05`. For
 produces reviewed failures, but the paired flip asymmetry is not strong enough to
 make the same statistical claim.
 
+We also repeated the evaluation three times with fresh clean and noisy model
+calls. The direction held in every run: each noise type reduced accuracy each
+time.
+
+| Noise type | Runs | Mean drop | Min drop | Max drop | Drop sd |
+|---|---:|---:|---:|---:|---:|
+| `pasted_context_block` | 3 | 0.025 | 0.019 | 0.032 | 0.007 |
+| `cursing` | 3 | 0.022 | 0.017 | 0.026 | 0.005 |
+| `telegraphic_request` | 3 | 0.016 | 0.014 | 0.020 | 0.003 |
+| `argumentative_challenge` | 3 | 0.014 | 0.010 | 0.019 | 0.004 |
+| `irrelevant_context` | 3 | 0.011 | 0.009 | 0.012 | 0.002 |
+| `removed_spaces` | 3 | 0.009 | 0.005 | 0.013 | 0.004 |
+| `typos` | 3 | 0.006 | 0.003 | 0.009 | 0.003 |
+
 Reviewed regressions exclude rows where the oracle looked ambiguous, the
 augmentation may have changed the task, or the example was manually questionable.
 
@@ -335,6 +349,8 @@ Main outputs:
 ```text
 artifacts/analysis/article/dimension_results.csv
 artifacts/analysis/article/paired_stats.csv
+artifacts/analysis/article/stability_repeat_summary.csv
+artifacts/analysis/article/stability_repeat_runs.csv
 artifacts/analysis/article/review_filtering.csv
 artifacts/analysis/article/overall_error_type_counts.csv
 artifacts/analysis/article/included_failure_examples.csv

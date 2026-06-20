@@ -122,6 +122,9 @@ The GitHub-facing findings note uses article artifacts under:
 - `artifacts/analysis/article/oracle_issue_examples.csv`
 - `artifacts/analysis/article/paired_stats.csv`
 - `artifacts/analysis/article/review_filtering.csv`
+- `artifacts/analysis/article/stability_repeat_summary.csv`
+- `artifacts/analysis/article/stability_repeat_runs.csv`
+- `artifacts/analysis/article/stability_repeat_summary.json`
 
 These article-facing files are intentionally small and checked into the repo so
 readers can inspect the reported results without rerunning the model.
