@@ -1,0 +1,8 @@
+dimension,sampled_failure_candidates,oracle_preserved_yes,oracle_preserved_unclear,oracle_preserved_no,production_like_yes,production_like_unclear,production_like_no,natural_user_style_yes,natural_user_style_unclear,natural_user_style_no,active_constraints_unchanged_yes,active_constraints_unchanged_unclear,active_constraints_unchanged_no,included_rate,reviewer_notes
+argumentative_challenge,8,7,0,1,7,0,1,7,0,1,7,0,1,0.75,Accepted examples model distrust or impatience while keeping the final request; questionable rows are excluded.
+cursing,7,5,2,0,5,2,0,5,2,0,5,2,0,0.7142857142857143,"Accepted examples model frustrated user register; profanity is a surface marker, not the claim itself."
+irrelevant_context,6,3,3,0,3,3,0,3,3,0,3,3,0,0.3333333333333333,Accepted examples add plausible side context without changing the task; questionable rows are excluded.
+pasted_context_block,4,3,1,0,3,1,0,3,1,0,3,1,0,0.5,Accepted examples model copied surrounding context and instructions; this dimension needs broader human audit before a larger claim.
+removed_spaces,5,1,4,0,1,4,0,1,4,0,1,4,0,0.2,"Weakest realism dimension; spacing edits can create lexical artifacts, so unclear and artifact rows are excluded."
+telegraphic_request,4,2,2,0,2,2,0,2,2,0,2,2,0,0.5,Accepted examples model terse user shorthand; this should be audited beyond failure candidates before scaling.
+typos,6,4,2,0,4,2,0,4,2,0,4,2,0,0.3333333333333333,"Mixed: accepted examples preserve intent, but typo edits can collide with entities or argument strings; questionable rows are excluded."

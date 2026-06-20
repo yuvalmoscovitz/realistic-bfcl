@@ -57,6 +57,10 @@ The current noise types are deliberately simple:
 - `pasted_context_block`
 - `telegraphic_request`
 
+In the discussion below, `cursing` is best read as a frustrated-register
+condition. Profanity is one concrete marker of user impatience; it is not the
+scientific claim by itself.
+
 These are not jailbreaks. They are not meant to be clever attacks. They are
 ordinary ways people write when they are rushed, annoyed, casual, or copying
 from somewhere else.
@@ -67,26 +71,51 @@ Clean accuracy on this pool was `76.1%`.
 
 Here is what happened after adding each kind of noise:
 
-| Noise type | Clean acc. | Noisy acc. | Drop | Reviewed regressions |
-|---|---:|---:|---:|---:|
-| `telegraphic_request` | 0.761 | 0.746 | 0.014 | 75 |
-| `pasted_context_block` | 0.761 | 0.742 | 0.019 | 74 |
-| `cursing` | 0.761 | 0.744 | 0.017 | 67 |
-| `irrelevant_context` | 0.761 | 0.749 | 0.012 | 58 |
-| `argumentative_challenge` | 0.761 | 0.751 | 0.010 | 54 |
-| `typos` | 0.761 | 0.758 | 0.003 | 45 |
-| `removed_spaces` | 0.761 | 0.753 | 0.008 | 41 |
+| Noise type | Clean acc. | Noisy acc. | Drop | Clean ok -> noisy fail | Clean fail -> noisy ok | McNemar p |
+|---|---:|---:|---:|---:|---:|---:|
+| `pasted_context_block` | 0.761 | 0.742 | 0.019 | 96 | 51 | 0.0003 |
+| `cursing` | 0.761 | 0.744 | 0.017 | 97 | 58 | 0.0022 |
+| `telegraphic_request` | 0.761 | 0.746 | 0.014 | 98 | 64 | 0.0093 |
+| `irrelevant_context` | 0.761 | 0.749 | 0.012 | 84 | 56 | 0.0222 |
+| `argumentative_challenge` | 0.761 | 0.751 | 0.010 | 76 | 52 | 0.0416 |
+| `removed_spaces` | 0.761 | 0.753 | 0.008 | 76 | 57 | 0.1182 |
+| `typos` | 0.761 | 0.758 | 0.003 | 67 | 60 | 0.5946 |
 
 The drops are not huge.
 
 But that is not the interesting part.
 
-The interesting part is that these are paired examples. The model got the clean
-prompt right and then got the noisy version wrong, even though the intended tool
-call did not change.
+The interesting part is that these are paired examples. We can see both
+directions: clean prompts that broke under noise, and clean failures that
+recovered under noise. That matters because otherwise we might confuse
+directional degradation with ordinary stochastic churn.
+
+For five of the seven dimensions, the exact McNemar test is below an
+uncorrected `0.05`. With Bonferroni correction across seven tested dimensions,
+`pasted_context_block` and `cursing` remain below `0.05`. With
+Benjamini-Hochberg FDR at `q = 0.05`, the first four dimensions remain below the
+threshold. `argumentative_challenge`, `removed_spaces`, and `typos` still
+produce reviewed failures, but the paired flip asymmetry is weaker.
+
+We also repeated the evaluation three times with fresh clean and noisy model
+calls. The direction held in every run: each noise type reduced accuracy each
+time.
+
+| Noise type | Runs | Mean drop | Min drop | Max drop | Drop sd |
+|---|---:|---:|---:|---:|---:|
+| `pasted_context_block` | 3 | 0.025 | 0.019 | 0.032 | 0.007 |
+| `cursing` | 3 | 0.022 | 0.017 | 0.026 | 0.005 |
+| `telegraphic_request` | 3 | 0.016 | 0.014 | 0.020 | 0.003 |
+| `argumentative_challenge` | 3 | 0.014 | 0.010 | 0.019 | 0.004 |
+| `irrelevant_context` | 3 | 0.011 | 0.009 | 0.012 | 0.002 |
+| `removed_spaces` | 3 | 0.009 | 0.005 | 0.013 | 0.004 |
+| `typos` | 3 | 0.006 | 0.003 | 0.009 | 0.003 |
 
 Reviewed regressions exclude rows where the oracle looked ambiguous, the
 augmentation may have changed the task, or the example was manually questionable.
+The audit rules are in [annotation_protocol.md](annotation_protocol.md), and the
+first-pass realism audit summary is checked in as
+`artifacts/analysis/article/realism_audit_summary.csv`.
 
 So the table is trying to answer a conservative question:
 
@@ -328,6 +357,11 @@ Main outputs:
 
 ```text
 artifacts/analysis/article/dimension_results.csv
+artifacts/analysis/article/paired_stats.csv
+artifacts/analysis/article/realism_audit_summary.csv
+artifacts/analysis/article/stability_repeat_summary.csv
+artifacts/analysis/article/stability_repeat_runs.csv
+artifacts/analysis/article/review_filtering.csv
 artifacts/analysis/article/overall_error_type_counts.csv
 artifacts/analysis/article/included_failure_examples.csv
 artifacts/analysis/article/oracle_issue_examples.csv

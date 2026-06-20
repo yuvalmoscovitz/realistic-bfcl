@@ -32,13 +32,19 @@ We ran a 2,351-example BFCL-derived paired evaluation on `gpt-5.4-nano`.
 
 Clean accuracy was `0.761`. All seven realistic noise dimensions produced
 reviewed clean-success/noisy-failure regressions after oracle and manual-review
-filtering.
+filtering. Five of the seven also showed directional paired degradation under
+an uncorrected exact McNemar test.
 
-The strongest signals came from `telegraphic_request`, `pasted_context_block`,
-and `cursing`.
+We repeated the evaluation three times with fresh clean and noisy model calls.
+Every noise type degraded accuracy in every run. The largest mean drops came
+from `pasted_context_block`, `cursing`, and `telegraphic_request`.
 
 See [docs/findings.md](docs/findings.md) for the GitHub-facing research note,
 examples, tables, and implications.
+
+The small article-facing analysis bundle is checked in under
+`artifacts/analysis/article/` for inspection. Larger generated datasets,
+predictions, and intermediate analysis files remain ignored.
 
 ## Repository Map
 
@@ -50,6 +56,7 @@ configs/
   subsets/expanded_live.yaml   Larger single-turn pilot with BFCL live categories.
 docs/
   findings.md                  GitHub-facing research note and current results.
+  annotation_protocol.md       Manual audit labels and rejection rules.
   research_pipeline.md         Research workflow and artifact contract.
   realism_contract.md          Validity rules and rejection criteria.
   evaluation_metrics.md        Paired metrics and error taxonomy.
@@ -104,6 +111,10 @@ oracle-preserving dimensions:
 It also writes `artifacts/generated/augmentation_review.csv` for human
 inspection. Deterministic invariant checks reject examples that alter numbers,
 quoted strings, or visible gold argument values.
+
+The article-facing run currently uses the seven reviewed dimensions in
+`docs/findings.md`. Treat `cursing` as frustrated user register: profanity is a
+surface marker for impatience, not the scientific claim by itself.
 
 `augment-llm-pilot` creates saved LLM-generated augmentation candidates for
 human review. These candidates are not part of the default article-facing run

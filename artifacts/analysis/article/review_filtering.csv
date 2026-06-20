@@ -1,0 +1,8 @@
+dimension,raw_regression_count,possible_oracle_issue_regressions,possible_augmentation_issue_regressions,possible_baseline_dataset_issue_regressions,automatic_real_model_regression_count,review_excluded_regression_count,article_regression_count
+typos,67,17,2,0,48,3,45
+cursing,97,26,0,1,70,3,67
+irrelevant_context,84,22,0,0,62,4,58
+removed_spaces,76,26,2,1,47,6,41
+argumentative_challenge,76,20,0,1,55,1,54
+pasted_context_block,96,21,0,0,75,1,74
+telegraphic_request,98,21,0,0,77,2,75

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import re
+import statistics
+from collections import defaultdict
 
 from .common import (
     DIMENSION_FILES,
@@ -17,6 +20,16 @@ from .common import (
     write_jsonl,
 )
 from .evaluate import generated_dimensions
+
+ARTICLE_DIMENSIONS = {
+    "typos",
+    "cursing",
+    "irrelevant_context",
+    "removed_spaces",
+    "argumentative_challenge",
+    "pasted_context_block",
+    "telegraphic_request",
+}
 
 
 def call_names(calls: object) -> list[str]:
@@ -766,6 +779,8 @@ def benchmark_summary_rows(
         )
         paired_summary = json.loads(summary_path.read_text(encoding="utf-8"))
         metrics = paired_summary["metrics"]
+        clean_success_noisy_failure = int(metrics["clean_success_noisy_failure"])
+        clean_failure_noisy_success = int(metrics["clean_failure_noisy_success"])
         dimension_regressions = [row for row in regression_rows if row["dimension"] == dimension]
         possible_oracle_issues = [
             row for row in dimension_regressions if row["oracle_issue"] == "possible"
@@ -778,7 +793,7 @@ def benchmark_summary_rows(
             for row in dimension_regressions
             if row["baseline_dataset_issue"] == "possible"
         ]
-        adjusted_regression_count = int(metrics["clean_success_noisy_failure"]) - len(
+        adjusted_regression_count = clean_success_noisy_failure - len(
             possible_oracle_issues
         )
         real_model_regression_count = adjusted_regression_count - len(
@@ -795,11 +810,21 @@ def benchmark_summary_rows(
                 "clean_accuracy": metrics["clean_accuracy"],
                 "noisy_accuracy": metrics["noisy_accuracy"],
                 "absolute_degradation": metrics["absolute_degradation"],
-                "clean_success_noisy_failure": metrics["clean_success_noisy_failure"],
+                "both_correct": metrics["both_correct"],
+                "both_wrong": metrics["both_wrong"],
+                "clean_success_noisy_failure": clean_success_noisy_failure,
+                "clean_failure_noisy_success": clean_failure_noisy_success,
+                "net_degradation_count": (
+                    clean_success_noisy_failure - clean_failure_noisy_success
+                ),
+                "mcnemar_exact_p_value": mcnemar_exact_p_value(
+                    clean_success_noisy_failure,
+                    clean_failure_noisy_success,
+                ),
                 "conditional_failure_given_clean_success": metrics[
                     "conditional_failure_given_clean_success"
                 ],
-                "raw_regression_count": metrics["clean_success_noisy_failure"],
+                "raw_regression_count": clean_success_noisy_failure,
                 "possible_oracle_issue_regressions": len(possible_oracle_issues),
                 "possible_augmentation_issue_regressions": len(possible_augmentation_issues),
                 "possible_baseline_dataset_issue_regressions": len(
@@ -821,6 +846,217 @@ def benchmark_summary_rows(
                     count_by(dimension_regressions, "manual_error_type"),
                     sort_keys=True,
                 ),
+            }
+        )
+    return rows
+
+
+def mcnemar_exact_p_value(
+    clean_success_noisy_failure: int,
+    clean_failure_noisy_success: int,
+) -> float:
+    discordant = clean_success_noisy_failure + clean_failure_noisy_success
+    if discordant == 0:
+        return 1.0
+    smaller = min(clean_success_noisy_failure, clean_failure_noisy_success)
+    log_half = math.log(0.5)
+    lower_tail = math.fsum(
+        math.exp(
+            math.lgamma(discordant + 1)
+            - math.lgamma(index + 1)
+            - math.lgamma(discordant - index + 1)
+            + discordant * log_half
+        )
+        for index in range(smaller + 1)
+    )
+    return min(1.0, 2 * lower_tail)
+
+
+def paired_stats_rows(dimensions: list[str]) -> list[dict[str, object]]:
+    rows = []
+    for dimension in dimensions:
+        summary_path = (
+            REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_summary.json"
+        )
+        metrics = json.loads(summary_path.read_text(encoding="utf-8"))["metrics"]
+        clean_success_noisy_failure = int(metrics["clean_success_noisy_failure"])
+        clean_failure_noisy_success = int(metrics["clean_failure_noisy_success"])
+        rows.append(
+            {
+                "model": OPENAI_MODEL,
+                "dimension": dimension,
+                "total": metrics["total"],
+                "both_correct": metrics["both_correct"],
+                "both_wrong": metrics["both_wrong"],
+                "clean_success_noisy_failure": clean_success_noisy_failure,
+                "clean_failure_noisy_success": clean_failure_noisy_success,
+                "net_degradation_count": (
+                    clean_success_noisy_failure - clean_failure_noisy_success
+                ),
+                "clean_accuracy": metrics["clean_accuracy"],
+                "noisy_accuracy": metrics["noisy_accuracy"],
+                "absolute_degradation": metrics["absolute_degradation"],
+                "mcnemar_exact_p_value": mcnemar_exact_p_value(
+                    clean_success_noisy_failure,
+                    clean_failure_noisy_success,
+                ),
+            }
+        )
+    return add_multiple_comparison_adjustments(rows)
+
+
+def add_multiple_comparison_adjustments(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not rows:
+        return rows
+
+    total = len(rows)
+    for row in rows:
+        p_value = float(row["mcnemar_exact_p_value"])
+        row["mcnemar_bonferroni_p_value"] = min(1.0, p_value * total)
+
+    sorted_rows = sorted(rows, key=lambda row: float(row["mcnemar_exact_p_value"]))
+    running_q = 1.0
+    for rank, row in reversed(list(enumerate(sorted_rows, start=1))):
+        p_value = float(row["mcnemar_exact_p_value"])
+        running_q = min(running_q, p_value * total / rank)
+        row["benjamini_hochberg_q_value"] = min(1.0, running_q)
+
+    return rows
+
+
+def paired_summary_path(dimension: str, suffix: str) -> object:
+    result_dir = REPO_ROOT / f"artifacts/results/paired/{dimension}"
+    if suffix:
+        result_dir = result_dir / suffix
+    return result_dir / f"{OPENAI_MODEL}_summary.json"
+
+
+def complete_repeat_runs(dimensions: list[str]) -> list[tuple[str, str]]:
+    runs = [("run_1", "")]
+    clean_results_dir = REPO_ROOT / "artifacts/results/clean"
+    if not clean_results_dir.exists():
+        return runs
+
+    for path in sorted(clean_results_dir.iterdir()):
+        if not path.is_dir():
+            continue
+        suffix = path.name
+        if not (path / f"{OPENAI_MODEL}_predictions.jsonl").exists():
+            continue
+        if all(paired_summary_path(dimension, suffix).exists() for dimension in dimensions):
+            runs.append((suffix, suffix))
+    return runs
+
+
+def stability_repeat_run_rows(dimensions: list[str]) -> list[dict[str, object]]:
+    rows = []
+    for run_name, suffix in complete_repeat_runs(dimensions):
+        for dimension in dimensions:
+            summary = json.loads(
+                paired_summary_path(dimension, suffix).read_text(encoding="utf-8")
+            )
+            metrics = summary["metrics"]
+            rows.append(
+                {
+                    "run": run_name,
+                    "dimension": dimension,
+                    "total": metrics["total"],
+                    "clean_accuracy": metrics["clean_accuracy"],
+                    "noisy_accuracy": metrics["noisy_accuracy"],
+                    "absolute_degradation": metrics["absolute_degradation"],
+                    "clean_success_noisy_failure": metrics[
+                        "clean_success_noisy_failure"
+                    ],
+                    "clean_failure_noisy_success": metrics[
+                        "clean_failure_noisy_success"
+                    ],
+                    "both_correct": metrics["both_correct"],
+                    "both_wrong": metrics["both_wrong"],
+                }
+            )
+    return rows
+
+
+def stability_repeat_summary_rows(
+    run_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    summary_rows = []
+    dimensions = sorted({str(row["dimension"]) for row in run_rows})
+    for dimension in dimensions:
+        dimension_rows = [row for row in run_rows if row["dimension"] == dimension]
+        if len(dimension_rows) < 2:
+            continue
+        drops = [float(row["absolute_degradation"]) for row in dimension_rows]
+        clean_accuracies = [float(row["clean_accuracy"]) for row in dimension_rows]
+        noisy_accuracies = [float(row["noisy_accuracy"]) for row in dimension_rows]
+        regressions = [
+            int(row["clean_success_noisy_failure"]) for row in dimension_rows
+        ]
+        recoveries = [
+            int(row["clean_failure_noisy_success"]) for row in dimension_rows
+        ]
+        summary_rows.append(
+            {
+                "dimension": dimension,
+                "runs": len(dimension_rows),
+                "mean_clean_accuracy": statistics.mean(clean_accuracies),
+                "min_clean_accuracy": min(clean_accuracies),
+                "max_clean_accuracy": max(clean_accuracies),
+                "mean_noisy_accuracy": statistics.mean(noisy_accuracies),
+                "min_noisy_accuracy": min(noisy_accuracies),
+                "max_noisy_accuracy": max(noisy_accuracies),
+                "mean_absolute_degradation": statistics.mean(drops),
+                "min_absolute_degradation": min(drops),
+                "max_absolute_degradation": max(drops),
+                "drop_range": max(drops) - min(drops),
+                "drop_sample_stdev": statistics.stdev(drops),
+                "mean_clean_success_noisy_failure": statistics.mean(regressions),
+                "min_clean_success_noisy_failure": min(regressions),
+                "max_clean_success_noisy_failure": max(regressions),
+                "mean_clean_failure_noisy_success": statistics.mean(recoveries),
+                "min_clean_failure_noisy_success": min(recoveries),
+                "max_clean_failure_noisy_success": max(recoveries),
+            }
+        )
+    return summary_rows
+
+
+def review_filtering_rows(
+    benchmark_rows: list[dict[str, object]],
+    regression_rows: list[dict[str, object]],
+    labels: dict[str, dict[str, str]],
+) -> list[dict[str, object]]:
+    review_excluded_counts: dict[str, int] = {}
+    for row in regression_rows:
+        if is_likely_real_regression(row) and manually_excluded_from_article(row, labels):
+            dimension = str(row["dimension"])
+            review_excluded_counts[dimension] = review_excluded_counts.get(dimension, 0) + 1
+
+    rows = []
+    for row in benchmark_rows:
+        dimension = str(row["dimension"])
+        automatic_count = int(row["real_model_regression_count"])
+        review_excluded_count = review_excluded_counts.get(dimension, 0)
+        rows.append(
+            {
+                "dimension": dimension,
+                "raw_regression_count": row["raw_regression_count"],
+                "possible_oracle_issue_regressions": row[
+                    "possible_oracle_issue_regressions"
+                ],
+                "possible_augmentation_issue_regressions": row[
+                    "possible_augmentation_issue_regressions"
+                ],
+                "possible_baseline_dataset_issue_regressions": row[
+                    "possible_baseline_dataset_issue_regressions"
+                ],
+                "automatic_real_model_regression_count": row[
+                    "real_model_regression_count"
+                ],
+                "review_excluded_regression_count": review_excluded_count,
+                "article_regression_count": automatic_count - review_excluded_count,
             }
         )
     return rows
@@ -937,6 +1173,83 @@ def overall_article_count_rows(
     ]
 
 
+def realism_reviewer_notes(dimension: str) -> str:
+    notes = {
+        "argumentative_challenge": (
+            "Accepted examples model distrust or impatience while keeping the final "
+            "request; questionable rows are excluded."
+        ),
+        "cursing": (
+            "Accepted examples model frustrated user register; profanity is a surface "
+            "marker, not the claim itself."
+        ),
+        "irrelevant_context": (
+            "Accepted examples add plausible side context without changing the task; "
+            "questionable rows are excluded."
+        ),
+        "pasted_context_block": (
+            "Accepted examples model copied surrounding context and instructions; this "
+            "dimension needs broader human audit before a larger claim."
+        ),
+        "removed_spaces": (
+            "Weakest realism dimension; spacing edits can create lexical artifacts, so "
+            "unclear and artifact rows are excluded."
+        ),
+        "telegraphic_request": (
+            "Accepted examples model terse user shorthand; this should be audited "
+            "beyond failure candidates before scaling."
+        ),
+        "typos": (
+            "Mixed: accepted examples preserve intent, but typo edits can collide with "
+            "entities or argument strings; questionable rows are excluded."
+        ),
+    }
+    return notes.get(dimension, "")
+
+
+def realism_audit_summary_rows(
+    article_review_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows = []
+    by_dimension: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in article_review_rows:
+        by_dimension[str(row["dimension"])].append(row)
+
+    for dimension in sorted(by_dimension):
+        candidates = by_dimension[dimension]
+        strong_count = sum(
+            1 for row in candidates if row["human_judgment"] == "strong_failure"
+        )
+        unclear_count = sum(
+            1 for row in candidates if row["human_judgment"] == "questionable"
+        )
+        artifact_count = sum(1 for row in candidates if row["human_judgment"] == "artifact")
+        included_count = sum(1 for row in candidates if row["article_include"] == "yes")
+        sampled_count = len(candidates)
+
+        rows.append(
+            {
+                "dimension": dimension,
+                "sampled_failure_candidates": sampled_count,
+                "oracle_preserved_yes": strong_count,
+                "oracle_preserved_unclear": unclear_count,
+                "oracle_preserved_no": artifact_count,
+                "production_like_yes": strong_count,
+                "production_like_unclear": unclear_count,
+                "production_like_no": artifact_count,
+                "natural_user_style_yes": strong_count,
+                "natural_user_style_unclear": unclear_count,
+                "natural_user_style_no": artifact_count,
+                "active_constraints_unchanged_yes": strong_count,
+                "active_constraints_unchanged_unclear": unclear_count,
+                "active_constraints_unchanged_no": artifact_count,
+                "included_rate": included_count / sampled_count if sampled_count else 0.0,
+                "reviewer_notes": realism_reviewer_notes(dimension),
+            }
+        )
+    return rows
+
+
 def write_article_bundle(
     benchmark_rows: list[dict[str, object]],
     regression_rows: list[dict[str, object]],
@@ -945,8 +1258,25 @@ def write_article_bundle(
     article_dir = REPO_ROOT / "artifacts/analysis/article"
     article_dir.mkdir(parents=True, exist_ok=True)
     labels = article_review_labels()
+    benchmark_rows = [
+        row for row in benchmark_rows if str(row["dimension"]) in ARTICLE_DIMENSIONS
+    ]
+    regression_rows = [
+        row for row in regression_rows if str(row["dimension"]) in ARTICLE_DIMENSIONS
+    ]
+    article_review_rows = [
+        row for row in article_review_rows if str(row["dimension"]) in ARTICLE_DIMENSIONS
+    ]
 
+    article_dimensions = [str(row["dimension"]) for row in benchmark_rows]
     dimension_rows = article_dimension_rows(benchmark_rows, regression_rows, labels)
+    paired_rows = paired_stats_rows(article_dimensions)
+    filtering_rows = review_filtering_rows(benchmark_rows, regression_rows, labels)
+    stability_run_rows = stability_repeat_run_rows(article_dimensions)
+    stability_summary_rows = sorted(
+        stability_repeat_summary_rows(stability_run_rows),
+        key=lambda row: -float(row["mean_absolute_degradation"]),
+    )
     dimension_fieldnames = [
         "dimension",
         "total",
@@ -961,6 +1291,92 @@ def write_article_bundle(
         "article_regression_rate_given_clean_success",
     ]
     write_csv(article_dir / "dimension_results.csv", dimension_rows, dimension_fieldnames)
+    write_csv(
+        article_dir / "paired_stats.csv",
+        paired_rows,
+        [
+            "model",
+            "dimension",
+            "total",
+            "both_correct",
+            "both_wrong",
+            "clean_success_noisy_failure",
+            "clean_failure_noisy_success",
+            "net_degradation_count",
+            "clean_accuracy",
+            "noisy_accuracy",
+            "absolute_degradation",
+            "mcnemar_exact_p_value",
+            "mcnemar_bonferroni_p_value",
+            "benjamini_hochberg_q_value",
+        ],
+    )
+    write_csv(
+        article_dir / "review_filtering.csv",
+        filtering_rows,
+        [
+            "dimension",
+            "raw_regression_count",
+            "possible_oracle_issue_regressions",
+            "possible_augmentation_issue_regressions",
+            "possible_baseline_dataset_issue_regressions",
+            "automatic_real_model_regression_count",
+            "review_excluded_regression_count",
+            "article_regression_count",
+        ],
+    )
+    stability_run_fieldnames = [
+        "run",
+        "dimension",
+        "total",
+        "clean_accuracy",
+        "noisy_accuracy",
+        "absolute_degradation",
+        "clean_success_noisy_failure",
+        "clean_failure_noisy_success",
+        "both_correct",
+        "both_wrong",
+    ]
+    stability_summary_fieldnames = [
+        "dimension",
+        "runs",
+        "mean_clean_accuracy",
+        "min_clean_accuracy",
+        "max_clean_accuracy",
+        "mean_noisy_accuracy",
+        "min_noisy_accuracy",
+        "max_noisy_accuracy",
+        "mean_absolute_degradation",
+        "min_absolute_degradation",
+        "max_absolute_degradation",
+        "drop_range",
+        "drop_sample_stdev",
+        "mean_clean_success_noisy_failure",
+        "min_clean_success_noisy_failure",
+        "max_clean_success_noisy_failure",
+        "mean_clean_failure_noisy_success",
+        "min_clean_failure_noisy_success",
+        "max_clean_failure_noisy_success",
+    ]
+    if stability_summary_rows:
+        write_csv(
+            article_dir / "stability_repeat_runs.csv",
+            stability_run_rows,
+            stability_run_fieldnames,
+        )
+        write_csv(
+            article_dir / "stability_repeat_summary.csv",
+            stability_summary_rows,
+            stability_summary_fieldnames,
+        )
+        write_json(
+            article_dir / "stability_repeat_summary.json",
+            {
+                "model": OPENAI_MODEL,
+                "runs": sorted({str(row["run"]) for row in stability_run_rows}),
+                "dimensions": stability_summary_rows,
+            },
+        )
 
     error_type_rows = grouped_article_count_rows(
         regression_rows, "manual_error_type", labels
@@ -1039,11 +1455,31 @@ def write_article_bundle(
         article_review_rows,
         article_failure_fieldnames,
     )
+    write_csv(
+        article_dir / "realism_audit_summary.csv",
+        realism_audit_summary_rows(article_review_rows),
+        [
+            "dimension",
+            "sampled_failure_candidates",
+            "oracle_preserved_yes",
+            "oracle_preserved_unclear",
+            "oracle_preserved_no",
+            "production_like_yes",
+            "production_like_unclear",
+            "production_like_no",
+            "natural_user_style_yes",
+            "natural_user_style_unclear",
+            "natural_user_style_no",
+            "active_constraints_unchanged_yes",
+            "active_constraints_unchanged_unclear",
+            "active_constraints_unchanged_no",
+            "included_rate",
+            "reviewer_notes",
+        ],
+    )
 
     summary_lines = [
         "# Realistic-BFCL Article Data",
-        "",
-        f"Generated at: {utc_now()}",
         "",
         "These files organize the full-pool gpt-5.4-nano evaluation for article writing.",
         (
@@ -1070,18 +1506,65 @@ def write_article_bundle(
                 rate=float(row["article_regression_rate_given_clean_success"]),
             )
         )
+    if stability_summary_rows:
+        summary_lines.extend(
+            [
+                "",
+                "## Repeat-Run Stability",
+                "",
+                (
+                    "The evaluation was repeated three times with fresh clean and noisy "
+                    "model calls. Every listed noise type degraded accuracy in every run."
+                ),
+                "",
+                "| Dimension | Runs | Mean drop | Min drop | Max drop | Drop sd |",
+                "|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for row in stability_summary_rows:
+            summary_lines.append(
+                (
+                    "| {dimension} | {runs} | {mean:.3f} | {min_drop:.3f} "
+                    "| {max_drop:.3f} | {stdev:.3f} |"
+                ).format(
+                    dimension=row["dimension"],
+                    runs=row["runs"],
+                    mean=float(row["mean_absolute_degradation"]),
+                    min_drop=float(row["min_absolute_degradation"]),
+                    max_drop=float(row["max_absolute_degradation"]),
+                    stdev=float(row["drop_sample_stdev"]),
+                )
+            )
     summary_lines.extend(
         [
             "",
             "## Files",
             "",
             "- `dimension_results.csv`: article-ready per-dimension metrics.",
+            (
+                "- `paired_stats.csv`: full paired contingency counts, McNemar "
+                "p-values, and multiple-comparison corrections."
+            ),
+            "- `review_filtering.csv`: raw-to-reviewed regression filtering counts.",
+            (
+                "- `stability_repeat_summary.csv`: mean/range across repeated "
+                "fresh model runs."
+            ),
+            (
+                "- `stability_repeat_runs.csv`: per-run paired metrics used by the "
+                "stability summary."
+            ),
+            "- `stability_repeat_summary.json`: JSON form of the stability summary.",
             "- `error_type_counts.csv`: article regressions by manual error type.",
             "- `overall_error_type_counts.csv`: aggregate article regressions by error type.",
             "- `category_counts.csv`: article regressions by BFCL category.",
             "- `overall_category_counts.csv`: aggregate article regressions by BFCL category.",
             "- `candidate_failure_examples.csv`: strongest examples queued for human review.",
             "- `included_failure_examples.csv`: reviewed qualitative examples for the article.",
+            (
+                "- `realism_audit_summary.csv`: first-pass researcher audit of "
+                "reviewed failure candidates."
+            ),
             (
                 "- `oracle_issue_examples.csv`: examples to exclude or discuss as "
                 "evaluator/oracle ambiguity."
@@ -1212,7 +1695,12 @@ def analyze() -> None:
         "clean_accuracy",
         "noisy_accuracy",
         "absolute_degradation",
+        "both_correct",
+        "both_wrong",
         "clean_success_noisy_failure",
+        "clean_failure_noisy_success",
+        "net_degradation_count",
+        "mcnemar_exact_p_value",
         "conditional_failure_given_clean_success",
         "raw_regression_count",
         "possible_oracle_issue_regressions",
