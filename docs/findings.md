@@ -1,21 +1,71 @@
-# Realistic-BFCL: What We Found So Far
+# Realistic-BFCL: A Small Test For Messy Tool Use
 
-This is a small experiment, not a benchmark launch.
+Suppose we have a function-calling benchmark example:
 
-The question was simple:
+```text
+Find the cost of a 2 GB and a 4 GB AWS EC2 machine with one CPU.
+```
 
-> If a model gets a BFCL tool-call example right when the prompt is clean, does
-> it still get it right when the user writes like an actual person?
+The model gets it right. It calls the pricing tool twice: once for `2 GB`, once
+for `4 GB`.
 
-For `gpt-5.4-nano`, the answer is: often yes, but not reliably enough to ignore.
+Now change only the user prompt:
 
-Clean accuracy on the current 2,351-example BFCL-derived pool was `76.1%`.
-After adding realistic, oracle-preserving user mess, we found hundreds of cases
-where the clean prompt was correct and the noisy prompt failed.
+```text
+what's cost of 2 and 4 gb ram machine on aws ec2 with one CPU? fucking please man
+```
 
-## The Result
+The tool schema is the same. The gold answer is the same. The only difference is
+that the user sounds like a user.
 
-Same model. Same tools. Same gold oracle. Only the user prompt changes.
+In one reviewed Realistic-BFCL run, `gpt-5.4-nano` now called the pricing tool
+only once.
+
+That is the whole point of this project.
+
+Clean function-calling benchmarks are useful. But they usually test clean
+requests. Real users paste random context, write shorthand, complain, mistype
+things, remove spaces, and ask for multiple actions casually. A model can look
+good on the clean benchmark and still be brittle in those cases.
+
+Realistic-BFCL asks a narrow question:
+
+> If the clean BFCL prompt succeeds, does the same model still make the same
+> tool call when the prompt is written more like real user traffic?
+
+## The Experiment
+
+I started from a 2,351-example BFCL-derived pool.
+
+For each example, I kept:
+
+- the same tool schema
+- the same expected function name
+- the same expected arguments
+- the same evaluator
+- the same model
+
+Then I changed only the user prompt.
+
+The current noise types are deliberately simple:
+
+- `typos`
+- `cursing`
+- `irrelevant_context`
+- `removed_spaces`
+- `argumentative_challenge`
+- `pasted_context_block`
+- `telegraphic_request`
+
+These are not jailbreaks. They are not meant to be clever attacks. They are
+ordinary ways people write when they are rushed, annoyed, casual, or copying
+from somewhere else.
+
+## Result
+
+Clean accuracy on this pool was `76.1%`.
+
+Here is what happened after adding each kind of noise:
 
 | Noise type | Clean acc. | Noisy acc. | Drop | Reviewed regressions |
 |---|---:|---:|---:|---:|
@@ -27,23 +77,29 @@ Same model. Same tools. Same gold oracle. Only the user prompt changes.
 | `typos` | 0.761 | 0.758 | 0.003 | 45 |
 | `removed_spaces` | 0.761 | 0.753 | 0.008 | 41 |
 
-“Reviewed regressions” means:
+The drops are not huge.
 
-- the clean prompt was correct
-- the noisy prompt was wrong
-- the original BFCL oracle was preserved
-- possible oracle/alias issues were excluded
-- possible augmentation mistakes were excluded
-- manually questionable examples were excluded
+But that is not the interesting part.
 
-So these are not raw “anything changed” counts. They are the conservative set I
-would be willing to show someone else.
+The interesting part is that these are paired examples. The model got the clean
+prompt right and then got the noisy version wrong, even though the intended tool
+call did not change.
 
-## What Broke
+Reviewed regressions exclude rows where the oracle looked ambiguous, the
+augmentation may have changed the task, or the example was manually questionable.
 
-The model usually did not completely fall apart. That is the point.
+So the table is trying to answer a conservative question:
 
-Most failures looked plausible at a glance:
+```text
+How often did ordinary prompt messiness break a tool call that already worked?
+```
+
+## What The Failures Look Like
+
+Most failures were not dramatic.
+
+The model usually still emitted a valid-looking tool call. It was just the wrong
+one.
 
 | Failure type | Count |
 |---|---:|
@@ -54,174 +110,210 @@ Most failures looked plausible at a glance:
 | Argument drop | 1 |
 | Malformed call | 1 |
 
-The failure pattern is very production-like:
+This matters because these are the failures that are easiest to miss in a real
+system. The JSON parses. The endpoint exists. The call looks plausible. But it
+does the wrong thing.
 
-- it calls the right kind of thing, but with the wrong argument
-- it handles the first requested call and drops the second
-- it chooses a nearby endpoint instead of the specific endpoint
-- it treats messy context as if it mattered
+## A Few Examples
 
-That is more worrying than a loud malformed-output failure, because it looks
-reasonable unless you check the actual call.
-
-## Examples
-
-Full rows are in:
+The full reviewed rows are in:
 
 ```text
 artifacts/analysis/article/included_failure_examples.csv
 ```
 
-Here are a few reviewed examples in plain English.
+Here are some examples that show the shape of the problem.
 
-### 1. Profanity makes the model drop one of two required calls
-
-Clean:
-
-> What's cost of 2 and 4 gb ram machine on aws ec2 with one CPU?
-
-Noisy:
-
-> what's cost of 2 and 4 gb ram machine on aws ec2 with one CPU? fucking please man
-
-Expected: call AWS pricing twice, once for 2 GB and once for 4 GB.
-
-Noisy result: only calls pricing for 2 GB.
-
-This is a good example because the profanity does not change the task. It just
-changes the way a real annoyed user might phrase it.
-
-### 2. Telegraphic input drops the second item
+### Profanity Drops A Parallel Call
 
 Clean:
 
-> interviewers list for Python and Java
+```text
+What's cost of 2 and 4 gb ram machine on aws ec2 with one CPU?
+```
 
 Noisy:
 
-> interviewers list Python and Java
+```text
+what's cost of 2 and 4 gb ram machine on aws ec2 with one CPU? fucking please man
+```
 
-Expected: one call for Python, one call for Java.
+Expected: two pricing calls.
 
-Noisy result: only calls the Python lookup.
+Noisy result: one pricing call.
 
-This is not adversarial. People type like this all the time.
+The profanity does not change the task. But the model now handles only part of
+it.
 
-### 3. Frustration changes the selected tool
+### Shorthand Drops The Second Item
 
 Clean:
 
-> Can you help me translate this English text to Danish: 'The quick brown fox jumps over the lazy dog.'
+```text
+interviewers list for Python and Java
+```
 
 Noisy:
 
-> last time you messed this up, so answer carefully can you help me translate this English text to Danish: 'The quick brown fox jumps over the lazy dog.'
+```text
+interviewers list Python and Java
+```
 
-Expected: the same translation function that worked on the clean prompt.
+Expected: one lookup for Python and one lookup for Java.
 
-Noisy result: routes to a different translation tool.
+Noisy result: only Python.
 
-The task did not change. The tone changed.
+This is not a weird prompt. It is exactly the kind of thing someone types into a
+chat box.
 
-### 4. A specific lookup becomes a list endpoint
+### Frustration Changes The Tool
 
 Clean:
 
-> The maintenance config is needed for 'sandcastle'.
+```text
+Can you help me translate this English text to Danish: 'The quick brown fox jumps over the lazy dog.'
+```
 
 Noisy:
 
-> this is bullshit the maintenance config is needed for 'sandcastle'.
+```text
+last time you messed this up, so answer carefully can you help me translate this English text to Danish: 'The quick brown fox jumps over the lazy dog.'
+```
 
-Expected: get the maintenance config with `id = sandcastle`.
+Expected: the same translation tool.
 
-Noisy result: calls a generic list-maintenance-configs endpoint.
+Noisy result: a different translation tool.
 
-This is the kind of error that can easily look fine in logs unless you compare
-against the exact intended tool call.
+The user added emotion, not a new requirement.
 
-### 5. Pasted context pushes a simple math tool call off track
+### A Specific Lookup Becomes A List Endpoint
 
-The original task asks:
+Clean:
 
-> 3 of my friends gave me 10 euros each, how much do I have now?
+```text
+The maintenance config is needed for 'sandcastle'.
+```
 
-The noisy prompt adds:
+Noisy:
 
-> based on the earlier draft please but ignore the opener. also ignore the ending, both made it worse
+```text
+this is bullshit the maintenance config is needed for 'sandcastle'.
+```
+
+Expected: fetch the maintenance config with `id = sandcastle`.
+
+Noisy result: call a generic list-maintenance-configs endpoint.
+
+Again, the output looks reasonable unless you check the exact intended call.
+
+### Pasted Text Changes A Math Call
+
+The actual task was:
+
+```text
+3 of my friends gave me 10 euros each, how much do I have now?
+```
+
+The noisy prompt also included:
+
+```text
+based on the earlier draft please but ignore the opener. also ignore the ending, both made it worse
+```
 
 Expected: `multiply(a=3, b=10)`.
 
 Noisy result: `add(a=10, b=10)`.
 
-The extra text says to ignore the earlier draft, but the router still changes
-behavior.
+The extra text should not matter. But it did.
 
-## What This Suggests
+## Why This Is Useful
 
-Finding 1: clean benchmark success does not imply prompt-surface robustness.
+This is not trying to prove that `gpt-5.4-nano` is bad. It is one cheap model on
+one BFCL-derived pool.
 
-The model can route the clean prompt and still fail when the same request is
-written tersely, angrily, or with irrelevant context around it.
-
-Finding 2: the dangerous failures are often quiet.
-
-The model usually emits a valid-looking call. The problem is that one argument
-changed, one call disappeared, or the wrong endpoint was selected.
-
-Finding 3: pasted context and telegraphic requests are worth testing.
-
-These were not complicated adversarial transformations. They are normal user
-behavior. They also produced some of the strongest signals.
-
-Finding 4: oracle preservation is the whole game.
-
-If the augmentation changes the task, the result is not useful. For this reason,
-the analysis excludes possible oracle issues, possible augmentation issues, and
-manually questionable rows.
-
-## Why This Is Not a Full Paper Yet
-
-This is intentionally small:
-
-- one model
-- one BFCL-derived pool
-- deterministic augmentations
-- no model leaderboard
-- no claim that these seven noise types cover real usage
-
-That is fine for the current goal. The useful claim is narrower:
-
-> A clean function-calling benchmark can miss realistic tool-routing failures,
-> and an oracle-preserving noisy layer is a simple way to expose them.
-
-## How This Relates To Other Agent Benchmarks
-
-This is closer in spirit to recent realistic-agent evaluation work than to a
-classic static benchmark paper.
-
-Related examples:
-
-- [Surge/Corecraft, "The Hierarchy of Agentic Capabilities"](https://arxiv.org/abs/2601.09032)
-  asks whether agents can do realistic workplace tasks, then reports a failure
-  hierarchy instead of stopping at one headline score.
-- [Tau-bench](https://arxiv.org/abs/2406.12045) tests tool agents through
-  user-agent interaction rather than single clean prompts.
-- [RealUserSim](https://arxiv.org/abs/2605.20204) argues that simulated users are
-  often too formal and cooperative, and that more realistic user behavior
-  exposes hidden failures.
-- [CRAB-Bench](https://arxiv.org/abs/2606.01815) makes a similar case for
-  imperfect users, distractors, and realistic service scenarios.
-
-Realistic-BFCL is smaller than those projects. Its advantage is that it keeps
-BFCL's deterministic oracle and makes the comparison paired:
+The useful point is methodological:
 
 ```text
-clean prompt succeeds
-same oracle + realistic noisy prompt fails
+clean benchmark example
++ oracle-preserving realistic rewrite
+= paired robustness test
 ```
 
-That makes the failure easy to inspect.
+That paired setup is powerful. It lets us separate two questions:
+
+1. Can the model solve the original benchmark example?
+2. Does realistic user messiness break that solution?
+
+Without the pair, those get mixed together.
+
+BFCL is a convenient place to test this because the evaluator is mostly
+black-and-white. Either the model called the right tool with the right arguments,
+or it did not.
+
+That makes the stress test easy to inspect.
+
+But the more important thesis is broader. In high-risk AI applications, the
+evaluation target is often not a neat exact match. It may be a rubric, an expert
+judgment, a preference ranking, or a multi-part assessment of whether the answer
+was complete, safe, and context-aware. In those settings, realistic user
+messiness may cause smaller, more subtle degradations that are harder to see in
+one headline score.
+
+That is exactly why this kind of stress testing matters. If a simple deterministic
+tool benchmark already shows prompt-surface brittleness, then messier, higher
+stakes domains deserve at least as much pressure testing.
+
+## The Main Lesson
+
+The biggest risk in this project is not that the model fails.
+
+The biggest risk is that the augmentation quietly changes the task.
+
+For example, if the original argument is `deer` and the noisy prompt says
+`dear`, that is no longer a clean model failure. It might be an augmentation
+mistake. If the original prompt asks for a decimal but the schema is ambiguous
+about percent formatting, that may be a baseline ambiguity.
+
+So Realistic-BFCL should stay strict:
+
+- preserve the oracle
+- review regressions manually
+- exclude ambiguous cases
+- report raw and filtered metrics separately
+
+The benchmark is only useful if the noisy prompt still means the same thing.
+
+## Relation To Other Work
+
+This is much smaller than recent realistic-agent benchmark projects, but it is
+pointing in the same direction.
+
+- [Surge/Corecraft, "The Hierarchy of Agentic Capabilities"](https://arxiv.org/abs/2601.09032)
+  evaluates agents on realistic workplace tasks and emphasizes concrete failure
+  modes.
+- [Tau-bench](https://arxiv.org/abs/2406.12045) evaluates tool agents through
+  user-agent interaction instead of only static prompts.
+- [RealUserSim](https://arxiv.org/abs/2605.20204) argues that simulated users are
+  often too cooperative, which can hide failures.
+- [CRAB-Bench](https://arxiv.org/abs/2606.01815) also tests imperfect users,
+  distractors, and realistic service settings.
+- Recent clinical AI evaluation work on
+  [case-specific clinician-authored rubrics](https://arxiv.org/abs/2604.24710)
+  is a useful example of the harder evaluation setting: the target is not one
+  exact string or one function call, but expert judgment over many case-specific
+  criteria.
+
+Realistic-BFCL is not trying to replace those. It is a smaller layer over an
+existing deterministic benchmark:
+
+```text
+same BFCL example
+same oracle
+same evaluator
+clean prompt vs. messy prompt
+```
+
+That makes the failures easy to inspect and easy to reproduce.
 
 ## Reproduce
 
@@ -241,17 +333,34 @@ artifacts/analysis/article/included_failure_examples.csv
 artifacts/analysis/article/oracle_issue_examples.csv
 ```
 
-## What I Would Do Next
+## Implications
 
-I would not immediately add ten more deterministic augmentations.
+The narrow result is about BFCL.
 
-Better next steps:
+The broader point is about evaluation.
 
-1. Add one LLM-generated but manually reviewed noise type based on realistic
-   pasted context or workplace history.
-2. Run the same setup on one stronger model and one weaker model.
-3. Publish the accepted noisy examples as a small dataset artifact.
-4. Keep the benchmark paired and oracle-preserving.
+Benchmarks often make the user unrealistically clean because clean inputs are
+easier to score. That is reasonable, but it leaves out an important failure
+surface. Real users bring context, emotion, shorthand, irrelevant text, copied
+material, and last-minute corrections. Tool routers and agents need to work under
+that distribution too.
 
-The main thing to protect is the validity of the oracle. Without that, the
-benchmark becomes just another noisy prompt set.
+Realistic-BFCL is useful because it gives us a clean laboratory for that idea:
+
+```text
+known oracle
++ same benchmark example
++ realistic prompt variation
+= measurable robustness gap
+```
+
+For harder-to-score tasks, the same idea should be even more important. If the
+evaluation requires rubrics or expert review, degradation may not appear as a
+single wrong function call. It may appear as a missed caveat, a slightly worse
+plan, an ignored constraint, or an overconfident answer. Those failures are
+harder to count, but in high-risk settings each one can matter.
+
+The takeaway:
+
+> Clean tool-calling accuracy can hide realistic prompt-surface failures. A
+> paired, oracle-preserving noisy layer makes those failures visible.
