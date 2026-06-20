@@ -57,6 +57,10 @@ The current noise types are deliberately simple:
 - `pasted_context_block`
 - `telegraphic_request`
 
+In the discussion below, `cursing` is best read as a frustrated-register
+condition. Profanity is one concrete marker of user impatience; it is not the
+scientific claim by itself.
+
 These are not jailbreaks. They are not meant to be clever attacks. They are
 ordinary ways people write when they are rushed, annoyed, casual, or copying
 from somewhere else.
@@ -86,10 +90,12 @@ directions: clean prompts that broke under noise, and clean failures that
 recovered under noise. That matters because otherwise we might confuse
 directional degradation with ordinary stochastic churn.
 
-For five of the seven dimensions, the exact McNemar test is below `0.05`. For
-`removed_spaces` and `typos`, the result is weaker: the noisy prompt still
-produces reviewed failures, but the paired flip asymmetry is not strong enough to
-make the same statistical claim.
+For five of the seven dimensions, the exact McNemar test is below an
+uncorrected `0.05`. With Bonferroni correction across seven tested dimensions,
+`pasted_context_block` and `cursing` remain below `0.05`. With
+Benjamini-Hochberg FDR at `q = 0.05`, the first four dimensions remain below the
+threshold. `argumentative_challenge`, `removed_spaces`, and `typos` still
+produce reviewed failures, but the paired flip asymmetry is weaker.
 
 We also repeated the evaluation three times with fresh clean and noisy model
 calls. The direction held in every run: each noise type reduced accuracy each
@@ -107,6 +113,9 @@ time.
 
 Reviewed regressions exclude rows where the oracle looked ambiguous, the
 augmentation may have changed the task, or the example was manually questionable.
+The audit rules are in [annotation_protocol.md](annotation_protocol.md), and the
+first-pass realism audit summary is checked in as
+`artifacts/analysis/article/realism_audit_summary.csv`.
 
 So the table is trying to answer a conservative question:
 
@@ -349,6 +358,7 @@ Main outputs:
 ```text
 artifacts/analysis/article/dimension_results.csv
 artifacts/analysis/article/paired_stats.csv
+artifacts/analysis/article/realism_audit_summary.csv
 artifacts/analysis/article/stability_repeat_summary.csv
 artifacts/analysis/article/stability_repeat_runs.csv
 artifacts/analysis/article/review_filtering.csv

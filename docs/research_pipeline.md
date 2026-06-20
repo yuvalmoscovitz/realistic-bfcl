@@ -125,6 +125,7 @@ GitHub-facing article outputs are written under:
 - `artifacts/analysis/article/included_failure_examples.csv`
 - `artifacts/analysis/article/oracle_issue_examples.csv`
 - `artifacts/analysis/article/paired_stats.csv`
+- `artifacts/analysis/article/realism_audit_summary.csv`
 - `artifacts/analysis/article/review_filtering.csv`
 - `artifacts/analysis/article/stability_repeat_summary.csv`
 - `artifacts/analysis/article/stability_repeat_runs.csv`

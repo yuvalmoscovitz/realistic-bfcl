@@ -121,6 +121,7 @@ The GitHub-facing findings note uses article artifacts under:
 - `artifacts/analysis/article/included_failure_examples.csv`
 - `artifacts/analysis/article/oracle_issue_examples.csv`
 - `artifacts/analysis/article/paired_stats.csv`
+- `artifacts/analysis/article/realism_audit_summary.csv`
 - `artifacts/analysis/article/review_filtering.csv`
 - `artifacts/analysis/article/stability_repeat_summary.csv`
 - `artifacts/analysis/article/stability_repeat_runs.csv`
@@ -128,3 +129,5 @@ The GitHub-facing findings note uses article artifacts under:
 
 These article-facing files are intentionally small and checked into the repo so
 readers can inspect the reported results without rerunning the model.
+The manual review labels and rejection rules are described in
+`docs/annotation_protocol.md`.

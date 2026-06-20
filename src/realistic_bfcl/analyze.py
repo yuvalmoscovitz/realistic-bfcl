@@ -5,6 +5,7 @@ import json
 import math
 import re
 import statistics
+from collections import defaultdict
 
 from .common import (
     DIMENSION_FILES,
@@ -901,6 +902,27 @@ def paired_stats_rows(dimensions: list[str]) -> list[dict[str, object]]:
                 ),
             }
         )
+    return add_multiple_comparison_adjustments(rows)
+
+
+def add_multiple_comparison_adjustments(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not rows:
+        return rows
+
+    total = len(rows)
+    for row in rows:
+        p_value = float(row["mcnemar_exact_p_value"])
+        row["mcnemar_bonferroni_p_value"] = min(1.0, p_value * total)
+
+    sorted_rows = sorted(rows, key=lambda row: float(row["mcnemar_exact_p_value"]))
+    running_q = 1.0
+    for rank, row in reversed(list(enumerate(sorted_rows, start=1))):
+        p_value = float(row["mcnemar_exact_p_value"])
+        running_q = min(running_q, p_value * total / rank)
+        row["benjamini_hochberg_q_value"] = min(1.0, running_q)
+
     return rows
 
 
@@ -1151,6 +1173,83 @@ def overall_article_count_rows(
     ]
 
 
+def realism_reviewer_notes(dimension: str) -> str:
+    notes = {
+        "argumentative_challenge": (
+            "Accepted examples model distrust or impatience while keeping the final "
+            "request; questionable rows are excluded."
+        ),
+        "cursing": (
+            "Accepted examples model frustrated user register; profanity is a surface "
+            "marker, not the claim itself."
+        ),
+        "irrelevant_context": (
+            "Accepted examples add plausible side context without changing the task; "
+            "questionable rows are excluded."
+        ),
+        "pasted_context_block": (
+            "Accepted examples model copied surrounding context and instructions; this "
+            "dimension needs broader human audit before a larger claim."
+        ),
+        "removed_spaces": (
+            "Weakest realism dimension; spacing edits can create lexical artifacts, so "
+            "unclear and artifact rows are excluded."
+        ),
+        "telegraphic_request": (
+            "Accepted examples model terse user shorthand; this should be audited "
+            "beyond failure candidates before scaling."
+        ),
+        "typos": (
+            "Mixed: accepted examples preserve intent, but typo edits can collide with "
+            "entities or argument strings; questionable rows are excluded."
+        ),
+    }
+    return notes.get(dimension, "")
+
+
+def realism_audit_summary_rows(
+    article_review_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows = []
+    by_dimension: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in article_review_rows:
+        by_dimension[str(row["dimension"])].append(row)
+
+    for dimension in sorted(by_dimension):
+        candidates = by_dimension[dimension]
+        strong_count = sum(
+            1 for row in candidates if row["human_judgment"] == "strong_failure"
+        )
+        unclear_count = sum(
+            1 for row in candidates if row["human_judgment"] == "questionable"
+        )
+        artifact_count = sum(1 for row in candidates if row["human_judgment"] == "artifact")
+        included_count = sum(1 for row in candidates if row["article_include"] == "yes")
+        sampled_count = len(candidates)
+
+        rows.append(
+            {
+                "dimension": dimension,
+                "sampled_failure_candidates": sampled_count,
+                "oracle_preserved_yes": strong_count,
+                "oracle_preserved_unclear": unclear_count,
+                "oracle_preserved_no": artifact_count,
+                "production_like_yes": strong_count,
+                "production_like_unclear": unclear_count,
+                "production_like_no": artifact_count,
+                "natural_user_style_yes": strong_count,
+                "natural_user_style_unclear": unclear_count,
+                "natural_user_style_no": artifact_count,
+                "active_constraints_unchanged_yes": strong_count,
+                "active_constraints_unchanged_unclear": unclear_count,
+                "active_constraints_unchanged_no": artifact_count,
+                "included_rate": included_count / sampled_count if sampled_count else 0.0,
+                "reviewer_notes": realism_reviewer_notes(dimension),
+            }
+        )
+    return rows
+
+
 def write_article_bundle(
     benchmark_rows: list[dict[str, object]],
     regression_rows: list[dict[str, object]],
@@ -1208,6 +1307,8 @@ def write_article_bundle(
             "noisy_accuracy",
             "absolute_degradation",
             "mcnemar_exact_p_value",
+            "mcnemar_bonferroni_p_value",
+            "benjamini_hochberg_q_value",
         ],
     )
     write_csv(
@@ -1354,6 +1455,28 @@ def write_article_bundle(
         article_review_rows,
         article_failure_fieldnames,
     )
+    write_csv(
+        article_dir / "realism_audit_summary.csv",
+        realism_audit_summary_rows(article_review_rows),
+        [
+            "dimension",
+            "sampled_failure_candidates",
+            "oracle_preserved_yes",
+            "oracle_preserved_unclear",
+            "oracle_preserved_no",
+            "production_like_yes",
+            "production_like_unclear",
+            "production_like_no",
+            "natural_user_style_yes",
+            "natural_user_style_unclear",
+            "natural_user_style_no",
+            "active_constraints_unchanged_yes",
+            "active_constraints_unchanged_unclear",
+            "active_constraints_unchanged_no",
+            "included_rate",
+            "reviewer_notes",
+        ],
+    )
 
     summary_lines = [
         "# Realistic-BFCL Article Data",
@@ -1418,7 +1541,10 @@ def write_article_bundle(
             "## Files",
             "",
             "- `dimension_results.csv`: article-ready per-dimension metrics.",
-            "- `paired_stats.csv`: full paired contingency counts and McNemar p-values.",
+            (
+                "- `paired_stats.csv`: full paired contingency counts, McNemar "
+                "p-values, and multiple-comparison corrections."
+            ),
             "- `review_filtering.csv`: raw-to-reviewed regression filtering counts.",
             (
                 "- `stability_repeat_summary.csv`: mean/range across repeated "
@@ -1435,6 +1561,10 @@ def write_article_bundle(
             "- `overall_category_counts.csv`: aggregate article regressions by BFCL category.",
             "- `candidate_failure_examples.csv`: strongest examples queued for human review.",
             "- `included_failure_examples.csv`: reviewed qualitative examples for the article.",
+            (
+                "- `realism_audit_summary.csv`: first-pass researcher audit of "
+                "reviewed failure candidates."
+            ),
             (
                 "- `oracle_issue_examples.csv`: examples to exclude or discuss as "
                 "evaluator/oracle ambiguity."

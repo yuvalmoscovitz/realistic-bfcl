@@ -32,7 +32,7 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 ## Files
 
 - `dimension_results.csv`: article-ready per-dimension metrics.
-- `paired_stats.csv`: full paired contingency counts and McNemar p-values.
+- `paired_stats.csv`: full paired contingency counts, McNemar p-values, and multiple-comparison corrections.
 - `review_filtering.csv`: raw-to-reviewed regression filtering counts.
 - `stability_repeat_summary.csv`: mean/range across repeated fresh model runs.
 - `stability_repeat_runs.csv`: per-run paired metrics used by the stability summary.
@@ -43,4 +43,5 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 - `overall_category_counts.csv`: aggregate article regressions by BFCL category.
 - `candidate_failure_examples.csv`: strongest examples queued for human review.
 - `included_failure_examples.csv`: reviewed qualitative examples for the article.
+- `realism_audit_summary.csv`: first-pass researcher audit of reviewed failure candidates.
 - `oracle_issue_examples.csv`: examples to exclude or discuss as evaluator/oracle ambiguity.
