@@ -28,22 +28,17 @@ the final oracle must be well-defined and derived from the clean oracle.
 
 ## Current Findings
 
-The current full-pool concept study evaluates `gpt-5.4-nano` on 2,351
-BFCL-derived examples with seven realistic noise dimensions. Clean accuracy is
-`0.761`; all seven noisy dimensions produce clean-success/noisy-failure
-regressions after oracle and manual-review filtering.
+We ran a 2,351-example BFCL-derived paired evaluation on `gpt-5.4-nano`.
 
-The strongest article-grade signals are:
+Clean accuracy was `0.761`. All seven realistic noise dimensions produced
+reviewed clean-success/noisy-failure regressions after oracle and manual-review
+filtering.
 
-- `telegraphic_request`: 75 reviewed regressions.
-- `pasted_context_block`: 74 reviewed regressions.
-- `cursing`: 67 reviewed regressions.
-
-The most common failure modes are wrong argument values, missing required tool
-calls, and wrong tool routing.
+The strongest signals came from `telegraphic_request`, `pasted_context_block`,
+and `cursing`.
 
 See [docs/findings.md](docs/findings.md) for the GitHub-facing research note,
-tables, reviewed examples, limitations, and reproduction commands.
+examples, tables, and implications.
 
 ## Repository Map
 
