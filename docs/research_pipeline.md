@@ -108,7 +108,7 @@ python scripts/run_stage.py analyze
 Purpose:
 - Compare clean and noisy outcomes for the same base example.
 - Separate raw degradation from possible oracle/evaluator strictness issues.
-- Produce review files for manual audit and paper tables.
+- Produce review files for manual audit and article-facing summaries.
 
 Primary outputs:
 - `artifacts/analysis/benchmark_summary.csv`
