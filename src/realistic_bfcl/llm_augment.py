@@ -32,6 +32,7 @@ from .evaluate import openai_retry_json
 
 GROK_CHAT_COMPLETIONS_URL = "https://api.x.ai/v1/chat/completions"
 DEFAULT_GROK_AUGMENT_MODEL = "grok-4.20-0309-non-reasoning"
+MAX_PROTECTED_QUOTED_LITERAL_CHARS = 120
 
 
 @dataclass(frozen=True)
@@ -585,8 +586,9 @@ def validate_llm_messages(
         if number not in numeric_tokens(augmented_text):
             reasons.append(f"clean numeric token missing from augmentation: {number!r}")
 
-    for quoted in quoted_literals(clean_prompt):
-        if quoted not in quoted_literals(augmented_text):
+    for quoted in protected_clean_quoted_literals(clean_prompt):
+        bare_quoted = quoted.strip("'\"")
+        if not literal_visible_in_text(bare_quoted, augmented_text):
             reasons.append(f"clean quoted literal missing from augmentation: {quoted!r}")
 
     for literal in primitive_gold_values(example["ground_truth"]):
@@ -695,6 +697,18 @@ def validate_llm_messages(
             reasons.append(f"benchmark meta-language leaked into prompt: {term!r}")
 
     return reasons
+
+
+def protected_clean_quoted_literals(clean_prompt: str) -> list[str]:
+    protected = []
+    stripped_prompt = clean_prompt.strip()
+    for quoted in quoted_literals(clean_prompt):
+        if quoted == stripped_prompt:
+            continue
+        if len(quoted.strip("'\"")) > MAX_PROTECTED_QUOTED_LITERAL_CHARS:
+            continue
+        protected.append(quoted)
+    return protected
 
 
 def normalized_messages(payload: dict[str, object]) -> list[dict[str, str]]:
