@@ -145,6 +145,14 @@ surface marker for impatience, not the scientific claim by itself.
 human review. These candidates are not part of the default article-facing run
 until manually reviewed and promoted.
 
+For Grok-generated realistic rewrite candidates, set:
+
+```bash
+REALISTIC_BFCL_LLM_PROVIDER=grok
+REALISTIC_BFCL_ENV_FILE=/path/to/.env
+REALISTIC_BFCL_LLM_DIMENSIONS=grok_super_casual_abbreviations,grok_frustrated_swearing,grok_student_broke_context,grok_typos_shorthand,grok_rambling_overexplaining,grok_impatient_direct_attitude,grok_arguing_correcting_ai,grok_confused_overwhelmed,grok_swearing_urgency_work,grok_vague_slightly_aggressive
+```
+
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
 AST checker, cache, and parallel OpenAI calls.
 

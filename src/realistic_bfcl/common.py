@@ -75,6 +75,16 @@ DIMENSION_FILES = {
     "llm_profane_frustration": "llm_profane_frustration.jsonl",
     "llm_argumentative_challenge": "llm_argumentative_challenge.jsonl",
     "llm_frustrated_distractor_context": "llm_frustrated_distractor_context.jsonl",
+    "grok_super_casual_abbreviations": "grok_super_casual_abbreviations.jsonl",
+    "grok_frustrated_swearing": "grok_frustrated_swearing.jsonl",
+    "grok_student_broke_context": "grok_student_broke_context.jsonl",
+    "grok_typos_shorthand": "grok_typos_shorthand.jsonl",
+    "grok_rambling_overexplaining": "grok_rambling_overexplaining.jsonl",
+    "grok_impatient_direct_attitude": "grok_impatient_direct_attitude.jsonl",
+    "grok_arguing_correcting_ai": "grok_arguing_correcting_ai.jsonl",
+    "grok_confused_overwhelmed": "grok_confused_overwhelmed.jsonl",
+    "grok_swearing_urgency_work": "grok_swearing_urgency_work.jsonl",
+    "grok_vague_slightly_aggressive": "grok_vague_slightly_aggressive.jsonl",
 }
 
 
