@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 
 from .common import (
@@ -710,14 +711,10 @@ def validate_augmented_prompt(
 
 
 def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
-    subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     output_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
 
-    if not subset_path.exists():
-        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run prepare-subset first.")
-
     rows = []
-    examples = read_jsonl(subset_path)
+    examples = selected_augmentation_examples()
     limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
     if limit is not None:
         examples = examples[:limit]
@@ -814,6 +811,22 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
     print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
 
 
+def selected_augmentation_examples() -> list[dict[str, object]]:
+    selection = os.environ.get("REALISTIC_BFCL_AUGMENT_SELECTION", "clean_subset").strip()
+    if selection == "clean_subset":
+        subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    elif selection == "rewrite_suitable":
+        subset_path = REPO_ROOT / "artifacts/frozen/rewrite_suitable_500.jsonl"
+    else:
+        raise SystemExit(
+            "REALISTIC_BFCL_AUGMENT_SELECTION must be one of: clean_subset, rewrite_suitable."
+        )
+    if not subset_path.exists():
+        missing_path = subset_path.relative_to(REPO_ROOT)
+        raise SystemExit(f"Missing {missing_path}. Run the prior stage first.")
+    return read_jsonl(subset_path)
+
+
 def augment_typos() -> None:
     augment_dimension("typos", "typos", typo_prompt)
 
@@ -877,11 +890,7 @@ def prompt_text(example: dict[str, object]) -> str:
 
 
 def review_augmentations() -> None:
-    clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     output_path = REPO_ROOT / "artifacts/generated/augmentation_review.csv"
-
-    if not clean_path.exists():
-        raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run prepare-subset first.")
 
     dimensions = (
         ("typos", "aug_typo"),
@@ -902,7 +911,7 @@ def review_augmentations() -> None:
             raise SystemExit(f"Missing {path.relative_to(REPO_ROOT)}. Run augment first.")
         generated_by_dimension[dimension] = {row["base_id"]: row for row in read_jsonl(path)}
 
-    examples = read_jsonl(clean_path)
+    examples = selected_augmentation_examples()
     limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
     if limit is not None:
         examples = examples[:limit]

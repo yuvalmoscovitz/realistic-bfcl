@@ -7,3 +7,8 @@ analysis/*
 !analysis/article/*.csv
 !analysis/article/*.json
 !analysis/article/README.md
+!frozen/
+frozen/*
+!frozen/rewrite_suitable_500.jsonl
+!frozen/rewrite_suitable_500_review.csv
+!frozen/rewrite_suitable_500_summary.json

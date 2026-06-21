@@ -145,6 +145,22 @@ surface marker for impatience, not the scientific claim by itself.
 human review. These candidates are not part of the default article-facing run
 until manually reviewed and promoted.
 
+For the LLM rewrite study, first build the representative 500-example
+rewrite-suitable subset:
+
+```bash
+python scripts/run_stage.py build-rewrite-subset
+```
+
+For LLM-generated realistic rewrite candidates, set the provider separately
+from the provider-neutral dimension names:
+
+```bash
+REALISTIC_BFCL_LLM_PROVIDER=grok
+REALISTIC_BFCL_ENV_FILE=/path/to/.env
+REALISTIC_BFCL_LLM_DIMENSIONS=llm_super_casual_abbreviations,llm_frustrated_swearing,llm_student_broke_context,llm_typos_shorthand,llm_rambling_overexplaining,llm_impatient_direct_attitude,llm_arguing_correcting_ai,llm_confused_overwhelmed,llm_swearing_urgency_work,llm_vague_slightly_aggressive
+```
+
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
 AST checker, cache, and parallel OpenAI calls.
 

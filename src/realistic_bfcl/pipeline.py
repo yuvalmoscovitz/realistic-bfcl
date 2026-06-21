@@ -7,6 +7,7 @@ from .analyze import analyze
 from .augment import augment
 from .evaluate import freeze_bfcl, run_bfcl
 from .llm_augment import augment_llm_pilot
+from .rewrite_subset import build_rewrite_subset
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,16 @@ STAGES: tuple[Stage, ...] = (
             "artifacts/generated/llm_profane_frustration.jsonl",
             "artifacts/generated/llm_argumentative_challenge.jsonl",
             "artifacts/generated/llm_frustrated_distractor_context.jsonl",
+            "artifacts/generated/llm_super_casual_abbreviations.jsonl",
+            "artifacts/generated/llm_frustrated_swearing.jsonl",
+            "artifacts/generated/llm_student_broke_context.jsonl",
+            "artifacts/generated/llm_typos_shorthand.jsonl",
+            "artifacts/generated/llm_rambling_overexplaining.jsonl",
+            "artifacts/generated/llm_impatient_direct_attitude.jsonl",
+            "artifacts/generated/llm_arguing_correcting_ai.jsonl",
+            "artifacts/generated/llm_confused_overwhelmed.jsonl",
+            "artifacts/generated/llm_swearing_urgency_work.jsonl",
+            "artifacts/generated/llm_vague_slightly_aggressive.jsonl",
             "artifacts/generated/llm_work_context_review.csv",
             "artifacts/generated/llm_prior_thread_review.csv",
             "artifacts/generated/llm_conversation_history_review.csv",
@@ -67,9 +78,33 @@ STAGES: tuple[Stage, ...] = (
             "artifacts/generated/llm_profane_frustration_review.csv",
             "artifacts/generated/llm_argumentative_challenge_review.csv",
             "artifacts/generated/llm_frustrated_distractor_context_review.csv",
+            "artifacts/generated/llm_super_casual_abbreviations_review.csv",
+            "artifacts/generated/llm_frustrated_swearing_review.csv",
+            "artifacts/generated/llm_student_broke_context_review.csv",
+            "artifacts/generated/llm_typos_shorthand_review.csv",
+            "artifacts/generated/llm_rambling_overexplaining_review.csv",
+            "artifacts/generated/llm_impatient_direct_attitude_review.csv",
+            "artifacts/generated/llm_arguing_correcting_ai_review.csv",
+            "artifacts/generated/llm_confused_overwhelmed_review.csv",
+            "artifacts/generated/llm_swearing_urgency_work_review.csv",
+            "artifacts/generated/llm_vague_slightly_aggressive_review.csv",
         ),
         next_action=(
             "Review accepted rows, then run paired evaluation for the LLM pilot dimensions."
+        ),
+    ),
+    Stage(
+        name="build-rewrite-subset",
+        purpose="Build the 500-example rewrite-suitable subset for LLM augmentation.",
+        inputs=("artifacts/frozen/clean_subset.jsonl",),
+        outputs=(
+            "artifacts/frozen/rewrite_suitable_500.jsonl",
+            "artifacts/frozen/rewrite_suitable_500_review.csv",
+            "artifacts/frozen/rewrite_suitable_500_summary.json",
+        ),
+        next_action=(
+            "Run a 50-example LLM augmentation/eval pilot using "
+            "REALISTIC_BFCL_LLM_SELECTION=rewrite_suitable."
         ),
     ),
     Stage(
@@ -145,6 +180,9 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         return
     if stage.name == "augment-llm-pilot":
         augment_llm_pilot()
+        return
+    if stage.name == "build-rewrite-subset":
+        build_rewrite_subset()
         return
     if stage.name == "run-bfcl":
         run_bfcl()

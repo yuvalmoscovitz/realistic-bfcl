@@ -4,7 +4,11 @@ import concurrent.futures
 import csv
 import json
 import os
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 from .augment import (
     literal_visible_in_text,
@@ -20,10 +24,15 @@ from .common import (
     openai_api_key,
     openai_concurrency,
     optional_positive_int_env,
+    read_env_file,
     read_jsonl,
     write_jsonl,
 )
 from .evaluate import openai_retry_json
+
+GROK_CHAT_COMPLETIONS_URL = "https://api.x.ai/v1/chat/completions"
+DEFAULT_GROK_AUGMENT_MODEL = "grok-4.20-0309-non-reasoning"
+MAX_PROTECTED_QUOTED_LITERAL_CHARS = 120
 
 
 @dataclass(frozen=True)
@@ -132,7 +141,101 @@ LLM_DIMENSIONS = (
         ),
         require_final_clean_prompt=True,
     ),
+    LlmDimension(
+        name="llm_super_casual_abbreviations",
+        suffix="llm_casual",
+        instruction=(
+            "Rewrite as a very casual rushed chat message with abbreviations or clipped "
+            "phrasing. Preserve every required slot and all parallel requests."
+        ),
+    ),
+    LlmDimension(
+        name="llm_frustrated_swearing",
+        suffix="llm_frustrated",
+        instruction=(
+            "Rewrite as a frustrated user message with natural swearing. Do not add new "
+            "constraints; the frustration is only tone."
+        ),
+    ),
+    LlmDimension(
+        name="llm_student_broke_context",
+        suffix="llm_student",
+        instruction=(
+            "Rewrite with student, broke, homework, side-project, or budget-stress "
+            "background. The background must not add active cheapest, budget, or price "
+            "constraints unless the clean prompt already asks for them."
+        ),
+    ),
+    LlmDimension(
+        name="llm_typos_shorthand",
+        suffix="llm_typos",
+        instruction=(
+            "Rewrite with common mobile typos and shorthand. Do not typo required IDs, "
+            "quoted strings, names, numbers, units, or values that determine the oracle."
+        ),
+    ),
+    LlmDimension(
+        name="llm_rambling_overexplaining",
+        suffix="llm_rambling",
+        instruction=(
+            "Rewrite as a rambling user who over-explains surrounding context before "
+            "making the same request. Extra context must be inactive."
+        ),
+    ),
+    LlmDimension(
+        name="llm_impatient_direct_attitude",
+        suffix="llm_impatient",
+        instruction=(
+            "Rewrite as an impatient direct message with attitude. Preserve the same "
+            "request and do not add deadline, ordering, or urgency constraints."
+        ),
+    ),
+    LlmDimension(
+        name="llm_arguing_correcting_ai",
+        suffix="llm_correcting",
+        instruction=(
+            "Rewrite as a follow-up where the user argues with or corrects the assistant "
+            "for a prior mistake. The prior mistake must not change the active request."
+        ),
+    ),
+    LlmDimension(
+        name="llm_confused_overwhelmed",
+        suffix="llm_confused",
+        instruction=(
+            "Rewrite as a confused or overwhelmed user who still states the final request "
+            "clearly enough for the same oracle."
+        ),
+    ),
+    LlmDimension(
+        name="llm_swearing_urgency_work",
+        suffix="llm_work_urgency",
+        instruction=(
+            "Rewrite with work-related urgency and natural swearing. The urgency must be "
+            "background pressure only, not a new scheduling or deadline constraint."
+        ),
+    ),
+    LlmDimension(
+        name="llm_vague_slightly_aggressive",
+        suffix="llm_vague_aggressive",
+        instruction=(
+            "Rewrite as slightly vague and aggressive while still preserving all required "
+            "entities, numbers, IDs, units, values, and parallel calls."
+        ),
+    ),
 )
+
+SINGLE_TURN_REWRITE_DIMENSIONS = {
+    "llm_super_casual_abbreviations",
+    "llm_frustrated_swearing",
+    "llm_student_broke_context",
+    "llm_typos_shorthand",
+    "llm_rambling_overexplaining",
+    "llm_impatient_direct_attitude",
+    "llm_arguing_correcting_ai",
+    "llm_confused_overwhelmed",
+    "llm_swearing_urgency_work",
+    "llm_vague_slightly_aggressive",
+}
 
 SENSITIVE_SLOT_TERMS = {
     "accepts_insurance": ("insurance", "insured", "self-pay", "self pay"),
@@ -187,7 +290,42 @@ INACTIVE_CONTEXT_MARKERS = (
 
 
 def llm_augment_model() -> str:
+    if os.environ.get("REALISTIC_BFCL_LLM_AUGMENT_MODEL"):
+        return os.environ["REALISTIC_BFCL_LLM_AUGMENT_MODEL"]
+    if llm_augment_provider() == "grok":
+        return DEFAULT_GROK_AUGMENT_MODEL
     return os.environ.get("REALISTIC_BFCL_LLM_AUGMENT_MODEL", OPENAI_MODEL)
+
+
+def llm_augment_provider() -> str:
+    return os.environ.get("REALISTIC_BFCL_LLM_PROVIDER", "openai").strip().lower()
+
+
+def grok_api_key() -> str:
+    if os.environ.get("GROK_API_KEY"):
+        return os.environ["GROK_API_KEY"]
+    if os.environ.get("XAI_API_KEY"):
+        return os.environ["XAI_API_KEY"]
+
+    candidates = [
+        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
+        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
+        else None,
+        REPO_ROOT / ".env",
+        REPO_ROOT.parent / "underlayer/.env",
+    ]
+    for path in candidates:
+        if path is None:
+            continue
+        values = read_env_file(path)
+        key = values.get("GROK_API_KEY") or values.get("XAI_API_KEY")
+        if key:
+            return key
+
+    raise SystemExit(
+        "Missing GROK_API_KEY or XAI_API_KEY. Set it in the environment or "
+        "REALISTIC_BFCL_ENV_FILE."
+    )
 
 
 def output_text(response: dict[str, object]) -> str:
@@ -201,6 +339,19 @@ def output_text(response: dict[str, object]) -> str:
     return "\n".join(parts).strip()
 
 
+def chat_output_text(response: dict[str, object]) -> str:
+    choices = response.get("choices", [])
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        return ""
+    message = first_choice.get("message", {})
+    if not isinstance(message, dict):
+        return ""
+    return str(message.get("content", "")).strip()
+
+
 def strip_json_fence(text: str) -> str:
     stripped = text.strip()
     if stripped.startswith("```json"):
@@ -210,6 +361,39 @@ def strip_json_fence(text: str) -> str:
     if stripped.endswith("```"):
         stripped = stripped[: -len("```")].strip()
     return stripped
+
+
+def grok_retry_json(payload: dict[str, object]) -> dict[str, object]:
+    request_data = json.dumps(payload).encode("utf-8")
+    request_headers = {
+        "Authorization": f"Bearer {grok_api_key()}",
+        "Content-Type": "application/json",
+    }
+    for attempt in range(1, 9):
+        request = urllib.request.Request(
+            GROK_CHAT_COMPLETIONS_URL,
+            data=request_data,
+            headers=request_headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            if error.code in {408, 409, 429, 500, 502, 503, 504} and attempt < 8:
+                retry_after = error.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after else min(60, 2**attempt)
+                time.sleep(max(1.0, delay))
+                continue
+            raise RuntimeError(f"Grok API request failed: HTTP {error.code}: {body}") from error
+        except urllib.error.URLError as error:
+            if attempt < 8:
+                time.sleep(min(60, 2**attempt))
+                continue
+            raise RuntimeError(f"Grok API request failed: {error}") from error
+
+    raise RuntimeError("Grok API request failed without returning a response.")
 
 
 def schema_property_names(example: dict[str, object]) -> set[str]:
@@ -303,6 +487,9 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "either natural profanity or explicit skepticism/pressure to be correct. "
                 "The distractor must not reuse exact entities, IDs, quoted strings, or "
                 "argument values from final_clean_user_message.",
+                "For single-turn rewrite dimensions, return exactly one user message. "
+                "It may paraphrase the clean prompt, but all active constraints and "
+                "all parallel/multiple requests must remain required.",
                 "When append_final_clean_prompt is true, do not include the final user "
                 "request in your output messages. Generate only the realistic pre-final "
                 "conversation; the final_clean_user_message will be appended by code.",
@@ -344,6 +531,35 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
 
 
 def call_llm_augmenter(example: dict[str, object], dimension: LlmDimension) -> dict[str, object]:
+    provider = llm_augment_provider()
+    if provider == "grok":
+        payload = {
+            "model": llm_augment_model(),
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You generate realistic oracle-preserving benchmark prompt "
+                        "augmentations. Return only valid JSON matching the requested "
+                        "schema."
+                    ),
+                },
+                {"role": "user", "content": augmentation_prompt(example, dimension)},
+            ],
+            "temperature": 0.75,
+            "max_tokens": 1200,
+            "response_format": {"type": "json_object"},
+        }
+        response = grok_retry_json(payload)
+        text = strip_json_fence(chat_output_text(response))
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"Grok augmentation returned invalid JSON: {text}") from error
+
+    if provider != "openai":
+        raise SystemExit("REALISTIC_BFCL_LLM_PROVIDER must be one of: openai, grok")
+
     payload = {
         "model": llm_augment_model(),
         "input": [
@@ -383,8 +599,9 @@ def validate_llm_messages(
         if number not in numeric_tokens(augmented_text):
             reasons.append(f"clean numeric token missing from augmentation: {number!r}")
 
-    for quoted in quoted_literals(clean_prompt):
-        if quoted not in quoted_literals(augmented_text):
+    for quoted in protected_clean_quoted_literals(clean_prompt):
+        bare_quoted = quoted.strip("'\"")
+        if not literal_visible_in_text(bare_quoted, augmented_text):
             reasons.append(f"clean quoted literal missing from augmentation: {quoted!r}")
 
     for literal in primitive_gold_values(example["ground_truth"]):
@@ -411,7 +628,7 @@ def validate_llm_messages(
         "llm_argumentative_challenge",
         "llm_frustrated_distractor_context",
     }
-    if dimension.name in single_turn_dimensions:
+    if dimension.name in single_turn_dimensions or dimension.name in SINGLE_TURN_REWRITE_DIMENSIONS:
         if len(messages) != 1:
             reasons.append(f"{dimension.name} must return exactly one user message")
         elif messages[0]["role"] != "user":
@@ -495,6 +712,18 @@ def validate_llm_messages(
     return reasons
 
 
+def protected_clean_quoted_literals(clean_prompt: str) -> list[str]:
+    protected = []
+    stripped_prompt = clean_prompt.strip()
+    for quoted in quoted_literals(clean_prompt):
+        if quoted == stripped_prompt:
+            continue
+        if len(quoted.strip("'\"")) > MAX_PROTECTED_QUOTED_LITERAL_CHARS:
+            continue
+        protected.append(quoted)
+    return protected
+
+
 def normalized_messages(payload: dict[str, object]) -> list[dict[str, str]]:
     messages = payload.get("messages")
     if not isinstance(messages, list):
@@ -521,6 +750,8 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
     def generate_one(index_and_example: tuple[int, dict[str, object]]) -> dict[str, object]:
         index, example = index_and_example
         last_errors = []
+        last_messages: list[dict[str, str]] = []
+        last_payload: dict[str, object] = {}
         for attempt in range(1, 13):
             try:
                 payload = call_llm_augmenter(example, dimension)
@@ -548,11 +779,13 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
                     "attempt": attempt,
                 }
             last_errors = validation_errors
+            last_messages = messages
+            last_payload = payload
         return {
             "index": index,
             "example": example,
-            "messages": [],
-            "payload": {},
+            "messages": last_messages,
+            "payload": last_payload,
             "validation_errors": last_errors,
             "attempt": 12,
         }
@@ -571,7 +804,9 @@ def generate_dimension(dimension: LlmDimension, examples: list[dict[str, object]
                         "base_id": example["id"],
                         "category": example["category"],
                         "clean_prompt": conversation_text(example["question"]),
-                        "augmented_prompt": "",
+                        "augmented_prompt": conversation_text([result["messages"]])
+                        if result["messages"]
+                        else "",
                         "function_names": ", ".join(
                             str(function["name"]) for function in example["function"]
                         ),
@@ -698,6 +933,11 @@ def select_llm_examples(examples: list[dict[str, object]]) -> list[dict[str, obj
     selection = os.environ.get("REALISTIC_BFCL_LLM_SELECTION", "first").strip()
     if selection == "first":
         return examples
+    if selection == "rewrite_suitable":
+        subset_path = REPO_ROOT / "artifacts/frozen/rewrite_suitable_500.jsonl"
+        if not subset_path.exists():
+            raise SystemExit("Missing rewrite-suitable subset. Run build-rewrite-subset first.")
+        return read_jsonl(subset_path)
     if selection == "hard_many_tools":
         priority = {
             "live_parallel_multiple": 0,
@@ -718,5 +958,6 @@ def select_llm_examples(examples: list[dict[str, object]]) -> list[dict[str, obj
             ),
         )
     raise SystemExit(
-        "REALISTIC_BFCL_LLM_SELECTION must be one of: first, hard_many_tools."
+        "REALISTIC_BFCL_LLM_SELECTION must be one of: "
+        "first, hard_many_tools, rewrite_suitable."
     )
