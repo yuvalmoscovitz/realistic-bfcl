@@ -142,24 +142,24 @@ LLM_DIMENSIONS = (
         require_final_clean_prompt=True,
     ),
     LlmDimension(
-        name="grok_super_casual_abbreviations",
-        suffix="grok_casual",
+        name="llm_super_casual_abbreviations",
+        suffix="llm_casual",
         instruction=(
             "Rewrite as a very casual rushed chat message with abbreviations or clipped "
             "phrasing. Preserve every required slot and all parallel requests."
         ),
     ),
     LlmDimension(
-        name="grok_frustrated_swearing",
-        suffix="grok_frustrated",
+        name="llm_frustrated_swearing",
+        suffix="llm_frustrated",
         instruction=(
             "Rewrite as a frustrated user message with natural swearing. Do not add new "
             "constraints; the frustration is only tone."
         ),
     ),
     LlmDimension(
-        name="grok_student_broke_context",
-        suffix="grok_student",
+        name="llm_student_broke_context",
+        suffix="llm_student",
         instruction=(
             "Rewrite with student, broke, homework, side-project, or budget-stress "
             "background. The background must not add active cheapest, budget, or price "
@@ -167,62 +167,75 @@ LLM_DIMENSIONS = (
         ),
     ),
     LlmDimension(
-        name="grok_typos_shorthand",
-        suffix="grok_typos",
+        name="llm_typos_shorthand",
+        suffix="llm_typos",
         instruction=(
             "Rewrite with common mobile typos and shorthand. Do not typo required IDs, "
             "quoted strings, names, numbers, units, or values that determine the oracle."
         ),
     ),
     LlmDimension(
-        name="grok_rambling_overexplaining",
-        suffix="grok_rambling",
+        name="llm_rambling_overexplaining",
+        suffix="llm_rambling",
         instruction=(
             "Rewrite as a rambling user who over-explains surrounding context before "
             "making the same request. Extra context must be inactive."
         ),
     ),
     LlmDimension(
-        name="grok_impatient_direct_attitude",
-        suffix="grok_impatient",
+        name="llm_impatient_direct_attitude",
+        suffix="llm_impatient",
         instruction=(
             "Rewrite as an impatient direct message with attitude. Preserve the same "
             "request and do not add deadline, ordering, or urgency constraints."
         ),
     ),
     LlmDimension(
-        name="grok_arguing_correcting_ai",
-        suffix="grok_correcting",
+        name="llm_arguing_correcting_ai",
+        suffix="llm_correcting",
         instruction=(
             "Rewrite as a follow-up where the user argues with or corrects the assistant "
             "for a prior mistake. The prior mistake must not change the active request."
         ),
     ),
     LlmDimension(
-        name="grok_confused_overwhelmed",
-        suffix="grok_confused",
+        name="llm_confused_overwhelmed",
+        suffix="llm_confused",
         instruction=(
             "Rewrite as a confused or overwhelmed user who still states the final request "
             "clearly enough for the same oracle."
         ),
     ),
     LlmDimension(
-        name="grok_swearing_urgency_work",
-        suffix="grok_work_urgency",
+        name="llm_swearing_urgency_work",
+        suffix="llm_work_urgency",
         instruction=(
             "Rewrite with work-related urgency and natural swearing. The urgency must be "
             "background pressure only, not a new scheduling or deadline constraint."
         ),
     ),
     LlmDimension(
-        name="grok_vague_slightly_aggressive",
-        suffix="grok_vague_aggressive",
+        name="llm_vague_slightly_aggressive",
+        suffix="llm_vague_aggressive",
         instruction=(
             "Rewrite as slightly vague and aggressive while still preserving all required "
             "entities, numbers, IDs, units, values, and parallel calls."
         ),
     ),
 )
+
+SINGLE_TURN_REWRITE_DIMENSIONS = {
+    "llm_super_casual_abbreviations",
+    "llm_frustrated_swearing",
+    "llm_student_broke_context",
+    "llm_typos_shorthand",
+    "llm_rambling_overexplaining",
+    "llm_impatient_direct_attitude",
+    "llm_arguing_correcting_ai",
+    "llm_confused_overwhelmed",
+    "llm_swearing_urgency_work",
+    "llm_vague_slightly_aggressive",
+}
 
 SENSITIVE_SLOT_TERMS = {
     "accepts_insurance": ("insurance", "insured", "self-pay", "self pay"),
@@ -474,9 +487,9 @@ def augmentation_prompt(example: dict[str, object], dimension: LlmDimension) -> 
                 "either natural profanity or explicit skepticism/pressure to be correct. "
                 "The distractor must not reuse exact entities, IDs, quoted strings, or "
                 "argument values from final_clean_user_message.",
-                "For grok_* dimensions, return exactly one user message. It may "
-                "paraphrase the clean prompt, but all active constraints and all "
-                "parallel/multiple requests must remain required.",
+                "For single-turn rewrite dimensions, return exactly one user message. "
+                "It may paraphrase the clean prompt, but all active constraints and "
+                "all parallel/multiple requests must remain required.",
                 "When append_final_clean_prompt is true, do not include the final user "
                 "request in your output messages. Generate only the realistic pre-final "
                 "conversation; the final_clean_user_message will be appended by code.",
@@ -615,7 +628,7 @@ def validate_llm_messages(
         "llm_argumentative_challenge",
         "llm_frustrated_distractor_context",
     }
-    if dimension.name in single_turn_dimensions or dimension.name.startswith("grok_"):
+    if dimension.name in single_turn_dimensions or dimension.name in SINGLE_TURN_REWRITE_DIMENSIONS:
         if len(messages) != 1:
             reasons.append(f"{dimension.name} must return exactly one user message")
         elif messages[0]["role"] != "user":

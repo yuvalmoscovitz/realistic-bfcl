@@ -5,6 +5,7 @@ import importlib
 import json
 import os
 import re
+import socket
 import sys
 import time
 import types
@@ -174,7 +175,7 @@ def openai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, obj
                 time.sleep(openai_retry_delay(error, body, attempt))
                 continue
             raise RuntimeError(f"OpenAI API request failed: HTTP {error.code}: {body}") from error
-        except urllib.error.URLError as error:
+        except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
             if attempt < OPENAI_MAX_ATTEMPTS:
                 time.sleep(min(60, 2**attempt))
                 continue
@@ -195,6 +196,8 @@ def openai_retry_delay(error: urllib.error.HTTPError, body: str, attempt: int) -
         delay = float(match.group(1))
         if match.group(2).lower() == "ms":
             delay /= 1000
+        if error.code == 429:
+            return max(5.0, delay)
         return max(1.0, delay)
     if error.code == 429:
         return min(60, 4 * attempt)
