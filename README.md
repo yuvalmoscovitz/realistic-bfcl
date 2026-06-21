@@ -20,7 +20,7 @@ What's cost of 2 and 4 GB RAM machine on AWS EC2 with one CPU?
 Realistic noisy prompt:
 
 ```text
-what's cost of 2 and 4 gb ram machine on aws ec2 with one CPU? fucking please man
+aws pricing calculator makes no sense. i just want an ec2 machine that has 2 gigabytes of ram and 1 cpu. also the 4gb one. how much is it
 ```
 
 The tool schema and gold answer are unchanged. The model should still call the
@@ -60,6 +60,16 @@ clean prompts.
 
 This repository currently supports a problem-posing article, not a complete
 multi-model benchmark paper.
+
+We also ran a controlled 250-example comparison on a rewrite-suitable subset.
+Deterministic augmentations are the auditable control surface: easy to
+reproduce, inspect, and reject when they touch oracle-bearing content. LLM
+rewrites are the realism surface: harder to validate, but closer to actual user
+traffic. On this controlled subset, deterministic dimensions had a mean raw
+drop of `2.12` points, while LLM rewrite dimensions had a mean raw drop of
+`2.95` points. The numeric lift is modest; the stronger reason to keep LLM
+rewrites is that they make the failure examples easier to recognize as
+realistic user behavior.
 
 See [docs/findings.md](docs/findings.md) for the GitHub-facing research note,
 examples, tables, and implications.
@@ -153,10 +163,11 @@ python scripts/run_stage.py build-rewrite-subset
 ```
 
 For LLM-generated realistic rewrite candidates, set the provider separately
-from the provider-neutral dimension names:
+from the provider-neutral dimension names. The provider is an implementation
+detail; the benchmark dimensions are provider-neutral.
 
 ```bash
-REALISTIC_BFCL_LLM_PROVIDER=grok
+REALISTIC_BFCL_LLM_PROVIDER=openai
 REALISTIC_BFCL_ENV_FILE=/path/to/.env
 REALISTIC_BFCL_LLM_DIMENSIONS=llm_super_casual_abbreviations,llm_frustrated_swearing,llm_student_broke_context,llm_typos_shorthand,llm_rambling_overexplaining,llm_impatient_direct_attitude,llm_arguing_correcting_ai,llm_confused_overwhelmed,llm_swearing_urgency_work,llm_vague_slightly_aggressive
 ```
