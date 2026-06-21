@@ -145,6 +145,13 @@ surface marker for impatience, not the scientific claim by itself.
 human review. These candidates are not part of the default article-facing run
 until manually reviewed and promoted.
 
+For the Grok rewrite study, first build the representative 500-example
+rewrite-suitable subset:
+
+```bash
+python scripts/run_stage.py build-rewrite-subset
+```
+
 For Grok-generated realistic rewrite candidates, set:
 
 ```bash

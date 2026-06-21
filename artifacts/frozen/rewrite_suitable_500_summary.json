@@ -1,0 +1,86 @@
+{
+  "eligible_by_category": {
+    "live_multiple": 1019,
+    "live_parallel": 16,
+    "live_parallel_multiple": 23,
+    "live_simple": 248,
+    "multiple": 200,
+    "parallel": 176,
+    "parallel_multiple": 189,
+    "simple_python": 399
+  },
+  "exclusion_counts": {
+    "credential_or_secret_heavy": 24,
+    "embedded_instruction_or_benchmark_scaffold": 45,
+    "too_long": 10,
+    "too_many_numbers": 4,
+    "too_many_quoted_literals": 11,
+    "too_many_tools": 2
+  },
+  "filters": {
+    "credential_or_secret_terms": [
+      "password",
+      "credential",
+      "authentication token",
+      "auth token",
+      "api key",
+      "secret key"
+    ],
+    "embedded_instruction_markers": [
+      "you are an ai assistant",
+      "you are an intelligent assistant",
+      "strictly use",
+      "you have access to below tools",
+      "control flow:",
+      "inner monologue",
+      "base instructions finished",
+      "function to be called",
+      "user query:",
+      "plan step",
+      "api response:",
+      "you are given a task",
+      "using your functions",
+      "identify the appropriate function",
+      "invoke the",
+      "sure, here is the answer",
+      "here is the answer to the question",
+      "i cannot answer this question"
+    ],
+    "explicit_tool_phrase_patterns": [
+      "\\busing the\\b.{0,80}\\bfunction\\b",
+      "\\buse the\\b.{0,80}\\bfunction\\b",
+      "\\buse\\b.{0,80}\\bfunction\\b",
+      "\\binvoke\\b.{0,80}\\bfunction\\b"
+    ],
+    "max_functions": 10,
+    "max_numeric_tokens": 20,
+    "max_prompt_chars": 900,
+    "max_quoted_literals": 8
+  },
+  "materialized_path": "artifacts/frozen/rewrite_suitable_500.jsonl",
+  "review_path": "artifacts/frozen/rewrite_suitable_500_review.csv",
+  "seed": 20260621,
+  "selected_by_category": {
+    "live_multiple": 141,
+    "live_parallel": 16,
+    "live_parallel_multiple": 23,
+    "live_simple": 65,
+    "multiple": 55,
+    "parallel": 60,
+    "parallel_multiple": 70,
+    "simple_python": 70
+  },
+  "source_path": "artifacts/frozen/clean_subset.jsonl",
+  "targets": {
+    "live_multiple": 141,
+    "live_parallel": 16,
+    "live_parallel_multiple": 23,
+    "live_simple": 65,
+    "multiple": 55,
+    "parallel": 60,
+    "parallel_multiple": 70,
+    "simple_python": 70
+  },
+  "total_selected": 500,
+  "total_source_examples": 2351
+}

@@ -7,6 +7,7 @@ from .analyze import analyze
 from .augment import augment
 from .evaluate import freeze_bfcl, run_bfcl
 from .llm_augment import augment_llm_pilot
+from .rewrite_subset import build_rewrite_subset
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,20 @@ STAGES: tuple[Stage, ...] = (
         ),
     ),
     Stage(
+        name="build-rewrite-subset",
+        purpose="Build the 500-example rewrite-suitable subset for Grok augmentation.",
+        inputs=("artifacts/frozen/clean_subset.jsonl",),
+        outputs=(
+            "artifacts/frozen/rewrite_suitable_500.jsonl",
+            "artifacts/frozen/rewrite_suitable_500_review.csv",
+            "artifacts/frozen/rewrite_suitable_500_summary.json",
+        ),
+        next_action=(
+            "Run a 50-example Grok augmentation/eval pilot using "
+            "REALISTIC_BFCL_LLM_SELECTION=rewrite_suitable."
+        ),
+    ),
+    Stage(
         name="run-bfcl",
         purpose="Run clean and noisy BFCL-style evaluation with identical schemas.",
         inputs=("artifacts/frozen/clean_subset.jsonl", "artifacts/generated/"),
@@ -165,6 +180,9 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         return
     if stage.name == "augment-llm-pilot":
         augment_llm_pilot()
+        return
+    if stage.name == "build-rewrite-subset":
+        build_rewrite_subset()
         return
     if stage.name == "run-bfcl":
         run_bfcl()

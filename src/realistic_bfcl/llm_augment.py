@@ -906,6 +906,11 @@ def select_llm_examples(examples: list[dict[str, object]]) -> list[dict[str, obj
     selection = os.environ.get("REALISTIC_BFCL_LLM_SELECTION", "first").strip()
     if selection == "first":
         return examples
+    if selection == "rewrite_suitable":
+        subset_path = REPO_ROOT / "artifacts/frozen/rewrite_suitable_500.jsonl"
+        if not subset_path.exists():
+            raise SystemExit("Missing rewrite-suitable subset. Run build-rewrite-subset first.")
+        return read_jsonl(subset_path)
     if selection == "hard_many_tools":
         priority = {
             "live_parallel_multiple": 0,
@@ -926,5 +931,6 @@ def select_llm_examples(examples: list[dict[str, object]]) -> list[dict[str, obj
             ),
         )
     raise SystemExit(
-        "REALISTIC_BFCL_LLM_SELECTION must be one of: first, hard_many_tools."
+        "REALISTIC_BFCL_LLM_SELECTION must be one of: "
+        "first, hard_many_tools, rewrite_suitable."
     )
