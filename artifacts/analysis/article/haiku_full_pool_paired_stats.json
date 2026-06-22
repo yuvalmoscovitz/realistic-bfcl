@@ -1,0 +1,60 @@
+{
+  "rows": [
+    {
+      "clean_failure_noisy_success": 9,
+      "clean_success_noisy_failure": 12,
+      "dimension": "typos",
+      "mcnemar_exact_p": 0.6636238098144531,
+      "model": "claude-haiku-4-5-20251001",
+      "net_regressions": 3
+    },
+    {
+      "clean_failure_noisy_success": 12,
+      "clean_success_noisy_failure": 30,
+      "dimension": "cursing",
+      "mcnemar_exact_p": 0.007915897334896727,
+      "model": "claude-haiku-4-5-20251001",
+      "net_regressions": 18
+    },
+    {
+      "clean_failure_noisy_success": 14,
+      "clean_success_noisy_failure": 29,
+      "dimension": "irrelevant_context",
+      "mcnemar_exact_p": 0.03153949735315109,
+      "model": "claude-haiku-4-5-20251001",
+      "net_regressions": 15
+    },
+    {
+      "clean_failure_noisy_success": 8,
+      "clean_success_noisy_failure": 13,
+      "dimension": "removed_spaces",
+      "mcnemar_exact_p": 0.38331031799316406,
+      "model": "claude-haiku-4-5-20251001",
+      "net_regressions": 5
+    },
+    {
+      "clean_failure_noisy_success": 12,
+      "clean_success_noisy_failure": 23,
+      "dimension": "argumentative_challenge",
+      "mcnemar_exact_p": 0.0895310789346695,
+      "model": "claude-haiku-4-5-20251001",
+      "net_regressions": 11
+    },
+    {
+      "clean_failure_noisy_success": 24,
+      "clean_success_noisy_failure": 26,
+      "dimension": "pasted_context_block",
+      "mcnemar_exact_p": 0.887724827340783,
+      "model": "claude-haiku-4-5-20251001",
+      "net_regressions": 2
+    },
+    {
+      "clean_failure_noisy_success": 17,
+      "clean_success_noisy_failure": 51,
+      "dimension": "telegraphic_request",
+      "mcnemar_exact_p": 4.453448771493584e-05,
+      "model": "claude-haiku-4-5-20251001",
+      "net_regressions": 34
+    }
+  ]
+}

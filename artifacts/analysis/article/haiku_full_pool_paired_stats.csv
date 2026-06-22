@@ -1,0 +1,8 @@
+model,dimension,clean_success_noisy_failure,clean_failure_noisy_success,net_regressions,mcnemar_exact_p
+claude-haiku-4-5-20251001,typos,12,9,3,0.6636238098144531
+claude-haiku-4-5-20251001,cursing,30,12,18,0.007915897334896727
+claude-haiku-4-5-20251001,irrelevant_context,29,14,15,0.03153949735315109
+claude-haiku-4-5-20251001,removed_spaces,13,8,5,0.38331031799316406
+claude-haiku-4-5-20251001,argumentative_challenge,23,12,11,0.0895310789346695
+claude-haiku-4-5-20251001,pasted_context_block,26,24,2,0.887724827340783
+claude-haiku-4-5-20251001,telegraphic_request,51,17,34,4.453448771493584e-05

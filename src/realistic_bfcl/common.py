@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,6 +14,9 @@ BFCL_COMMIT = "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
 BFCL_REPOSITORY = "https://github.com/ShishirPatil/gorilla"
 OPENAI_MODEL = "gpt-5.4-nano"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MESSAGE_BATCHES_URL = "https://api.anthropic.com/v1/messages/batches"
+XAI_CHAT_COMPLETIONS_URL = "https://api.x.ai/v1/chat/completions"
 DEFAULT_OPENAI_CONCURRENCY = 8
 OPENAI_MAX_ATTEMPTS = 8
 ROUTER_SYSTEM_INSTRUCTION = (
@@ -88,6 +92,18 @@ DIMENSION_FILES = {
 }
 
 
+@dataclass(frozen=True)
+class ModelRun:
+    id: str
+    provider: str
+    tier: str
+    temperature: float
+
+    @property
+    def filename(self) -> str:
+        return safe_model_filename(self.id)
+
+
 def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -127,6 +143,104 @@ def read_list_setting(path: Path, key: str) -> list[str]:
                 break
 
     return values
+
+
+def read_float_setting(path: Path, key: str, default: float) -> float:
+    prefix = f"{key}:"
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith(prefix):
+            return float(line.split(":", 1)[1].strip())
+    return default
+
+
+def read_model_setting(path: Path) -> list[dict[str, str]]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    models: list[dict[str, str]] = []
+    in_models = False
+    current: dict[str, str] | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "models:":
+            in_models = True
+            current = None
+            continue
+        if not in_models:
+            continue
+        if stripped and not line.startswith(" ") and not stripped.startswith("- "):
+            break
+        if stripped.startswith("- "):
+            if current:
+                models.append(current)
+            current = {}
+            item = stripped[2:].strip()
+            if item:
+                if ":" in item:
+                    key, value = item.split(":", 1)
+                    current[key.strip()] = value.strip()
+                else:
+                    current["id"] = item
+            continue
+        if current is not None and ":" in stripped:
+            key, value = stripped.split(":", 1)
+            current[key.strip()] = value.strip()
+
+    if current:
+        models.append(current)
+    return models
+
+
+def safe_model_filename(model_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", model_id).strip("_")
+
+
+def configured_model_runs() -> list[ModelRun]:
+    override = os.environ.get("REALISTIC_BFCL_MODELS")
+    temperature = evaluation_temperature()
+    if override:
+        return [
+            parse_model_override(item, temperature)
+            for item in override.split(",")
+            if item.strip()
+        ]
+
+    config_path = REPO_ROOT / "configs/project.yaml"
+    rows = read_model_setting(config_path)
+    if not rows:
+        rows = [{"id": OPENAI_MODEL, "provider": "openai", "tier": "small"}]
+    return [
+        ModelRun(
+            id=str(row.get("id", "")).strip(),
+            provider=str(row.get("provider", "openai")).strip().lower(),
+            tier=str(row.get("tier", "")).strip(),
+            temperature=temperature,
+        )
+        for row in rows
+        if str(row.get("id", "")).strip()
+    ]
+
+
+def parse_model_override(value: str, temperature: float) -> ModelRun:
+    parts = [part.strip() for part in value.strip().split(":")]
+    if len(parts) == 1:
+        return ModelRun(id=parts[0], provider="openai", tier="", temperature=temperature)
+    if len(parts) == 2:
+        provider, model_id = parts
+        return ModelRun(id=model_id, provider=provider.lower(), tier="", temperature=temperature)
+    if len(parts) == 3:
+        provider, model_id, tier = parts
+        return ModelRun(id=model_id, provider=provider.lower(), tier=tier, temperature=temperature)
+    raise SystemExit(
+        "REALISTIC_BFCL_MODELS entries must be model_id, provider:model_id, "
+        "or provider:model_id:tier."
+    )
+
+
+def evaluation_temperature() -> float:
+    value = os.environ.get("REALISTIC_BFCL_TEMPERATURE")
+    if value:
+        return float(value)
+    return read_float_setting(REPO_ROOT / "configs/project.yaml", "temperature", 0.0)
 
 
 def reject_placeholders(paths: tuple[Path, ...]) -> None:
@@ -209,6 +323,60 @@ def openai_api_key() -> str:
 
     raise SystemExit(
         "Missing OPENAI_API_KEY. Set it in the environment or REALISTIC_BFCL_ENV_FILE."
+    )
+
+
+def anthropic_api_key() -> str:
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return os.environ["ANTHROPIC_API_KEY"]
+    if os.environ.get("CLAUDE_API_KEY"):
+        return os.environ["CLAUDE_API_KEY"]
+
+    candidates = [
+        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
+        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
+        else None,
+        REPO_ROOT / ".env",
+        REPO_ROOT.parent / "underlayer/.env",
+    ]
+    for path in candidates:
+        if path is None:
+            continue
+        values = read_env_file(path)
+        key = values.get("ANTHROPIC_API_KEY") or values.get("CLAUDE_API_KEY")
+        if key:
+            return key
+
+    raise SystemExit(
+        "Missing ANTHROPIC_API_KEY or CLAUDE_API_KEY. Set it in the environment or "
+        "REALISTIC_BFCL_ENV_FILE."
+    )
+
+
+def xai_api_key() -> str:
+    if os.environ.get("XAI_API_KEY"):
+        return os.environ["XAI_API_KEY"]
+    if os.environ.get("GROK_API_KEY"):
+        return os.environ["GROK_API_KEY"]
+
+    candidates = [
+        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
+        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
+        else None,
+        REPO_ROOT / ".env",
+        REPO_ROOT.parent / "underlayer/.env",
+    ]
+    for path in candidates:
+        if path is None:
+            continue
+        values = read_env_file(path)
+        key = values.get("XAI_API_KEY") or values.get("GROK_API_KEY")
+        if key:
+            return key
+
+    raise SystemExit(
+        "Missing XAI_API_KEY or GROK_API_KEY. Set it in the environment or "
+        "REALISTIC_BFCL_ENV_FILE."
     )
 
 

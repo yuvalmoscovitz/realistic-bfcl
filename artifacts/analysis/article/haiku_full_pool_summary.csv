@@ -1,0 +1,9 @@
+model,provider,tier,dimension,total,clean_accuracy,noisy_accuracy,absolute_degradation,clean_success_noisy_failure,clean_failure_noisy_success,conditional_failure_given_clean_success,mcnemar_exact_p,net_regressions
+claude-haiku-4-5-20251001,anthropic,mid,typos,2351,0.831561,0.830285,0.001276,12,9,0.006138,0.6636238098144531,3
+claude-haiku-4-5-20251001,anthropic,mid,cursing,2351,0.831561,0.823905,0.007656,30,12,0.015345,0.007915897334896727,18
+claude-haiku-4-5-20251001,anthropic,mid,irrelevant_context,2351,0.831561,0.825181,0.00638,29,14,0.014834,0.03153949735315109,15
+claude-haiku-4-5-20251001,anthropic,mid,removed_spaces,2351,0.831561,0.829434,0.002127,13,8,0.00665,0.38331031799316406,5
+claude-haiku-4-5-20251001,anthropic,mid,argumentative_challenge,2351,0.831561,0.826882,0.004679,23,12,0.011765,0.0895310789346695,11
+claude-haiku-4-5-20251001,anthropic,mid,pasted_context_block,2351,0.831561,0.83071,0.000851,26,24,0.013299,0.887724827340783,2
+claude-haiku-4-5-20251001,anthropic,mid,telegraphic_request,2351,0.831561,0.817099,0.014462,51,17,0.026087,4.453448771493584e-05,34
+claude-haiku-4-5-20251001,anthropic,mid,pooled,16457,0.831561,0.826214,0.005347,184,96,0.013445,,

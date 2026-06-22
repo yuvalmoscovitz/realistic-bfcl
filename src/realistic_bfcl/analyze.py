@@ -12,6 +12,7 @@ from .common import (
     OPENAI_MODEL,
     REPO_ROOT,
     compact_text,
+    configured_model_runs,
     conversation_text,
     read_jsonl,
     utc_now,
@@ -851,6 +852,69 @@ def benchmark_summary_rows(
     return rows
 
 
+def model_comparison_rows(dimensions: list[str]) -> list[dict[str, object]]:
+    labels = article_review_labels()
+    clean_examples = {
+        row["id"]: row
+        for row in read_jsonl(REPO_ROOT / "artifacts/frozen/clean_subset.jsonl")
+    }
+    rows = []
+    for model in configured_model_runs():
+        for dimension in dimensions:
+            summary_path = (
+                REPO_ROOT / f"artifacts/results/paired/{dimension}/{model.filename}_summary.json"
+            )
+            paired_path = (
+                REPO_ROOT / f"artifacts/results/paired/{dimension}/{model.filename}_paired.jsonl"
+            )
+            if not summary_path.exists() or not paired_path.exists():
+                continue
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            metrics = summary["metrics"]
+            regression_rows = [
+                row
+                for row in read_jsonl(paired_path)
+                if row["clean_correct"] and not row["noisy_correct"]
+            ]
+            taxonomy: dict[str, int] = {}
+            reviewed_taxonomy: dict[str, int] = {}
+            reviewed_count = 0
+            for row in regression_rows:
+                clean_example = clean_examples[str(row["base_id"])]
+                error_type = heuristic_error_type(
+                    clean_example["ground_truth"],
+                    row["clean_prediction"],
+                    row["noisy_prediction"],
+                )
+                taxonomy[error_type] = taxonomy.get(error_type, 0) + 1
+                if labels.get(str(row["noisy_id"]), {}).get("article_include") == "yes":
+                    reviewed_count += 1
+                    reviewed_taxonomy[error_type] = reviewed_taxonomy.get(error_type, 0) + 1
+            rows.append(
+                {
+                    "model": model.id,
+                    "provider": model.provider,
+                    "tier": model.tier,
+                    "temperature": model.temperature,
+                    "dimension": dimension,
+                    "total": metrics["total"],
+                    "clean_accuracy": metrics["clean_accuracy"],
+                    "noisy_accuracy": metrics["noisy_accuracy"],
+                    "absolute_degradation": metrics["absolute_degradation"],
+                    "clean_success_noisy_failure": metrics["clean_success_noisy_failure"],
+                    "clean_failure_noisy_success": metrics["clean_failure_noisy_success"],
+                    "reviewed_regressions": reviewed_count,
+                    "unreviewed_regressions": int(metrics["clean_success_noisy_failure"])
+                    - reviewed_count,
+                    "failure_type_taxonomy": json.dumps(taxonomy, sort_keys=True),
+                    "reviewed_failure_type_taxonomy": json.dumps(
+                        reviewed_taxonomy, sort_keys=True
+                    ),
+                }
+            )
+    return rows
+
+
 def mcnemar_exact_p_value(
     clean_success_noisy_failure: int,
     clean_failure_noisy_success: int,
@@ -1602,6 +1666,7 @@ def analyze() -> None:
     )
     benchmark_summary_csv_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.csv"
     benchmark_summary_json_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.json"
+    model_comparison_path = REPO_ROOT / "artifacts/analysis/model_comparison.csv"
     write_csv(
         flip_review_path,
         flip_rows,
@@ -1714,6 +1779,30 @@ def analyze() -> None:
         "regressions_by_manual_error_type",
     ]
     write_csv(benchmark_summary_csv_path, benchmark_rows, benchmark_fieldnames)
+    model_comparison = model_comparison_rows(
+        [dimension for dimension in dimensions if dimension in ARTICLE_DIMENSIONS]
+    )
+    write_csv(
+        model_comparison_path,
+        model_comparison,
+        [
+            "model",
+            "provider",
+            "tier",
+            "temperature",
+            "dimension",
+            "total",
+            "clean_accuracy",
+            "noisy_accuracy",
+            "absolute_degradation",
+            "clean_success_noisy_failure",
+            "clean_failure_noisy_success",
+            "reviewed_regressions",
+            "unreviewed_regressions",
+            "failure_type_taxonomy",
+            "reviewed_failure_type_taxonomy",
+        ],
+    )
     write_json(
         benchmark_summary_json_path,
         {
@@ -1739,6 +1828,7 @@ def analyze() -> None:
             "dimensions": summaries,
             "benchmark_summary_csv": benchmark_summary_csv_path.relative_to(REPO_ROOT).as_posix(),
             "benchmark_summary_json": benchmark_summary_json_path.relative_to(REPO_ROOT).as_posix(),
+            "model_comparison_csv": model_comparison_path.relative_to(REPO_ROOT).as_posix(),
             "flip_review_csv": flip_review_path.relative_to(REPO_ROOT).as_posix(),
             "regression_review_csv": regression_review_path.relative_to(REPO_ROOT).as_posix(),
             "strong_failure_examples_csv": strong_failure_examples_path.relative_to(
@@ -1755,6 +1845,7 @@ def analyze() -> None:
     write_article_bundle(benchmark_rows, regression_rows, article_review_rows)
     print(f"Wrote {benchmark_summary_csv_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {benchmark_summary_json_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {model_comparison_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {regression_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {strong_failure_examples_path.relative_to(REPO_ROOT)}")
