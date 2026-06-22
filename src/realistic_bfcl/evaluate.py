@@ -14,12 +14,13 @@ import urllib.request
 from pathlib import Path
 
 from .common import (
+    ANTHROPIC_MESSAGE_BATCHES_URL,
+    ANTHROPIC_MESSAGES_URL,
     BFCL_CATEGORY_FILES,
     BFCL_COMMIT,
     BFCL_REPOSITORY,
     DIMENSION_FILES,
     OPENAI_MAX_ATTEMPTS,
-    OPENAI_MODEL,
     OPENAI_RESPONSES_URL,
     REPO_ROOT,
     RETRYABLE_HTTP_STATUS,
@@ -27,7 +28,11 @@ from .common import (
     ROUTER_MESSAGE_SERIALIZATION,
     ROUTER_SYSTEM_INSTRUCTION,
     ROUTER_TOOL_CHOICE,
+    XAI_CHAT_COMPLETIONS_URL,
+    ModelRun,
+    anthropic_api_key,
     append_jsonl,
+    configured_model_runs,
     file_sha256,
     openai_api_key,
     openai_concurrency,
@@ -40,6 +45,7 @@ from .common import (
     utc_now,
     write_json,
     write_jsonl,
+    xai_api_key,
 )
 
 
@@ -132,13 +138,140 @@ def safe_tool_name(name: str, index: int) -> str:
     return f"{safe}_{index}"
 
 
-def openai_tool(function_doc: dict[str, object], name: str) -> dict[str, object]:
+def responses_tool(function_doc: dict[str, object], name: str) -> dict[str, object]:
     parameters = normalize_json_schema(function_doc["parameters"])
     return {
         "type": "function",
         "name": name,
         "description": function_doc.get("description", ""),
         "parameters": parameters,
+    }
+
+
+def chat_completion_tool(function_doc: dict[str, object], name: str) -> dict[str, object]:
+    parameters = normalize_json_schema(function_doc["parameters"])
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": function_doc.get("description", ""),
+            "parameters": parameters,
+        },
+    }
+
+
+def anthropic_safe_property_name(name: str, used_names: set[str]) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)
+    safe = safe.strip("._-") or "arg"
+    if len(safe) > 64:
+        safe = f"{safe[:55]}_{stable_hash(name)[:8]}"
+    candidate = safe
+    counter = 2
+    while candidate in used_names:
+        suffix = f"_{counter}"
+        candidate = f"{safe[: 64 - len(suffix)]}{suffix}"
+        counter += 1
+    used_names.add(candidate)
+    return candidate
+
+
+def anthropic_safe_schema(value: object) -> tuple[object, dict[str, object]]:
+    if isinstance(value, list):
+        converted_items = []
+        item_maps = []
+        for item in value:
+            converted_item, item_map = anthropic_safe_schema(item)
+            converted_items.append(converted_item)
+            item_maps.append(item_map)
+        return converted_items, {"items": item_maps}
+
+    if not isinstance(value, dict):
+        return value, {}
+
+    converted: dict[str, object] = {}
+    property_map: dict[str, str] = {}
+    child_maps: dict[str, object] = {}
+    current_key_map: dict[str, str] | None = None
+
+    for key, child in value.items():
+        if key == "properties" and isinstance(child, dict):
+            current_key_map = {}
+            converted_properties: dict[str, object] = {}
+            used_names: set[str] = set()
+            for property_name, property_schema in child.items():
+                safe_name = anthropic_safe_property_name(str(property_name), used_names)
+                converted_property_schema, child_map = anthropic_safe_schema(property_schema)
+                converted_properties[safe_name] = converted_property_schema
+                current_key_map[str(property_name)] = safe_name
+                property_map[safe_name] = str(property_name)
+                if child_map:
+                    child_maps[safe_name] = child_map
+            converted[key] = converted_properties
+            continue
+        if key == "required" and isinstance(child, list):
+            converted[key] = child
+            continue
+
+        converted_child, child_map = anthropic_safe_schema(child)
+        converted[key] = converted_child
+        if child_map:
+            child_maps[key] = child_map
+
+    if current_key_map and isinstance(converted.get("required"), list):
+        converted["required"] = [
+            current_key_map.get(str(required_key), str(required_key))
+            for required_key in converted["required"]
+        ]
+
+    schema_map: dict[str, object] = {}
+    if property_map:
+        schema_map["properties"] = property_map
+    if child_maps:
+        schema_map["children"] = child_maps
+    return converted, schema_map
+
+
+def restore_anthropic_arguments(value: object, schema_map: object) -> object:
+    if isinstance(value, list):
+        item_maps = schema_map.get("items", []) if isinstance(schema_map, dict) else []
+        restored_items = []
+        for index, item in enumerate(value):
+            item_map = item_maps[index] if index < len(item_maps) else {}
+            restored_items.append(restore_anthropic_arguments(item, item_map))
+        return restored_items
+
+    if not isinstance(value, dict) or not isinstance(schema_map, dict):
+        return value
+
+    property_map = schema_map.get("properties", {})
+    child_maps = schema_map.get("children", {})
+    restored = {}
+    for key, child in value.items():
+        original_key = property_map.get(key, key) if isinstance(property_map, dict) else key
+        child_map = child_maps.get(key, {}) if isinstance(child_maps, dict) else {}
+        restored[original_key] = restore_anthropic_arguments(child, child_map)
+    return restored
+
+
+def anthropic_argument_schema_maps(example: dict[str, object]) -> dict[str, object]:
+    maps = {}
+    for index, function_doc in enumerate(example["function"]):
+        name = safe_tool_name(str(function_doc["name"]), index)
+        _schema, schema_map = anthropic_safe_schema(
+            normalize_json_schema(function_doc["parameters"])
+        )
+        maps[name] = schema_map
+    return maps
+
+
+def anthropic_tool(function_doc: dict[str, object], name: str) -> dict[str, object]:
+    parameters, _schema_map = anthropic_safe_schema(
+        normalize_json_schema(function_doc["parameters"])
+    )
+    return {
+        "name": name,
+        "description": function_doc.get("description", ""),
+        "input_schema": parameters,
     }
 
 
@@ -151,6 +284,17 @@ def bfcl_messages(example: dict[str, object]) -> list[dict[str, str]]:
         }
         for message in messages
     ]
+
+
+def anthropic_system_and_messages(example: dict[str, object]) -> tuple[str, list[dict[str, str]]]:
+    system_parts = [ROUTER_SYSTEM_INSTRUCTION]
+    messages = []
+    for message in bfcl_messages(example):
+        if message["role"] == "system":
+            system_parts.append(message["content"])
+            continue
+        messages.append(message)
+    return "\n\n".join(part for part in system_parts if part), messages
 
 
 def openai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object]:
@@ -184,6 +328,92 @@ def openai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, obj
     raise RuntimeError("OpenAI API request failed without returning a response.")
 
 
+def xai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object]:
+    request_data = json.dumps(payload).encode("utf-8")
+    request_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
+        request = urllib.request.Request(
+            XAI_CHAT_COMPLETIONS_URL,
+            data=request_data,
+            headers=request_headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            if error.code in RETRYABLE_HTTP_STATUS and attempt < OPENAI_MAX_ATTEMPTS:
+                time.sleep(openai_retry_delay(error, body, attempt))
+                continue
+            raise RuntimeError(f"xAI API request failed: HTTP {error.code}: {body}") from error
+        except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+            if attempt < OPENAI_MAX_ATTEMPTS:
+                time.sleep(min(60, 2**attempt))
+                continue
+            raise RuntimeError(f"xAI API request failed: {error}") from error
+
+    raise RuntimeError("xAI API request failed without returning a response.")
+
+
+def anthropic_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object]:
+    return anthropic_request_json("POST", ANTHROPIC_MESSAGES_URL, api_key, payload)
+
+
+def anthropic_request_json(
+    method: str,
+    url: str,
+    api_key: str,
+    payload: dict[str, object] | None = None,
+) -> dict[str, object]:
+    response_text = anthropic_request_text(method, url, api_key, payload)
+    return json.loads(response_text)
+
+
+def anthropic_request_text(
+    method: str,
+    url: str,
+    api_key: str,
+    payload: dict[str, object] | None = None,
+) -> str:
+    request_data = json.dumps(payload).encode("utf-8")
+    if payload is None:
+        request_data = None
+    request_headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
+        request = urllib.request.Request(
+            url,
+            data=request_data,
+            headers=request_headers,
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            if error.code in RETRYABLE_HTTP_STATUS and attempt < OPENAI_MAX_ATTEMPTS:
+                time.sleep(openai_retry_delay(error, body, attempt))
+                continue
+            raise RuntimeError(
+                f"Anthropic API request failed: HTTP {error.code}: {body}"
+            ) from error
+        except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+            if attempt < OPENAI_MAX_ATTEMPTS:
+                time.sleep(min(60, 2**attempt))
+                continue
+            raise RuntimeError(f"Anthropic API request failed: {error}") from error
+
+    raise RuntimeError("Anthropic API request failed without returning a response.")
+
+
 def openai_retry_delay(error: urllib.error.HTTPError, body: str, attempt: int) -> float:
     retry_after = error.headers.get("Retry-After")
     if retry_after:
@@ -204,12 +434,14 @@ def openai_retry_delay(error: urllib.error.HTTPError, body: str, attempt: int) -
     return min(60, 2**attempt)
 
 
-def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[str, object]:
+def call_openai_tool_router(example: dict[str, object], model: ModelRun) -> dict[str, object]:
     tools = []
     for index, function_doc in enumerate(example["function"]):
-        tools.append(openai_tool(function_doc, safe_tool_name(str(function_doc["name"]), index)))
+        tools.append(
+            responses_tool(function_doc, safe_tool_name(str(function_doc["name"]), index))
+        )
     payload = {
-        "model": OPENAI_MODEL,
+        "model": model.id,
         "input": [
             {
                 "role": "system",
@@ -220,8 +452,235 @@ def call_openai_tool_router(example: dict[str, object], api_key: str) -> dict[st
         "tools": tools,
         "tool_choice": ROUTER_TOOL_CHOICE,
         "max_output_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+        "temperature": model.temperature,
     }
-    return openai_retry_json(payload, api_key)
+    return openai_retry_json(payload, openai_api_key())
+
+
+def call_xai_tool_router(example: dict[str, object], model: ModelRun) -> dict[str, object]:
+    tools = []
+    for index, function_doc in enumerate(example["function"]):
+        tools.append(
+            chat_completion_tool(
+                function_doc,
+                safe_tool_name(str(function_doc["name"]), index),
+            )
+        )
+    payload = {
+        "model": model.id,
+        "messages": [
+            {
+                "role": "system",
+                "content": ROUTER_SYSTEM_INSTRUCTION,
+            },
+            *bfcl_messages(example),
+        ],
+        "tools": tools,
+        "tool_choice": "required",
+        "temperature": model.temperature,
+        "max_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+    }
+    return xai_retry_json(payload, xai_api_key())
+
+
+def anthropic_messages_payload(
+    example: dict[str, object], model: ModelRun
+) -> dict[str, object]:
+    tools = []
+    for index, function_doc in enumerate(example["function"]):
+        tools.append(
+            anthropic_tool(function_doc, safe_tool_name(str(function_doc["name"]), index))
+        )
+    system, messages = anthropic_system_and_messages(example)
+    payload = {
+        "model": model.id,
+        "system": system,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": {"type": "any"},
+        "temperature": model.temperature,
+        "max_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+    }
+    return payload
+
+
+def call_anthropic_tool_router(example: dict[str, object], model: ModelRun) -> dict[str, object]:
+    payload = anthropic_messages_payload(example, model)
+    return anthropic_retry_json(payload, anthropic_api_key())
+
+
+def call_tool_router(example: dict[str, object], model: ModelRun) -> dict[str, object]:
+    if model.provider == "openai":
+        return call_openai_tool_router(example, model)
+    if model.provider in {"anthropic", "claude"}:
+        return call_anthropic_tool_router(example, model)
+    if model.provider in {"xai", "grok"}:
+        return call_xai_tool_router(example, model)
+    raise SystemExit(f"Unsupported evaluation provider for {model.id}: {model.provider}")
+
+
+def use_batch_backend(model: ModelRun) -> bool:
+    backend = os.environ.get("REALISTIC_BFCL_EXECUTION", "").strip().lower()
+    if backend not in {"batch", "anthropic_batch"}:
+        return False
+    if model.provider not in {"anthropic", "claude"}:
+        raise SystemExit("REALISTIC_BFCL_EXECUTION=batch currently supports Anthropic only.")
+    return True
+
+
+def anthropic_batch_custom_id(index: int, example_id: object) -> str:
+    digest = stable_hash({"index": index, "id": example_id})[:16]
+    return f"rbfcl_{index}_{digest}"
+
+
+def anthropic_batch_request(
+    custom_id: str, example: dict[str, object], model: ModelRun
+) -> dict[str, object]:
+    return {
+        "custom_id": custom_id,
+        "params": anthropic_messages_payload(example, model),
+    }
+
+
+def anthropic_batch_state_path(model_predictions_path: Path) -> Path:
+    return model_predictions_path.with_name(f"{model_predictions_path.stem}_batch_state.json")
+
+
+def create_or_load_anthropic_batch(
+    examples: list[dict[str, object]],
+    model_predictions_path: Path,
+    model: ModelRun,
+) -> dict[str, object]:
+    state_path = anthropic_batch_state_path(model_predictions_path)
+    if state_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_MODEL_RUN"):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if state.get("status") != "completed":
+            print(f"Resuming Anthropic batch {state['batch_id']} for {model.id}")
+            return state
+
+    requests = []
+    custom_id_to_example_id = {}
+    for index, example in enumerate(examples):
+        custom_id = anthropic_batch_custom_id(index, example["id"])
+        custom_id_to_example_id[custom_id] = example["id"]
+        requests.append(anthropic_batch_request(custom_id, example, model))
+
+    response = anthropic_request_json(
+        "POST",
+        ANTHROPIC_MESSAGE_BATCHES_URL,
+        anthropic_api_key(),
+        {"requests": requests},
+    )
+    state = {
+        "batch_id": response["id"],
+        "created_at": utc_now(),
+        "model": model.id,
+        "provider": model.provider,
+        "temperature": model.temperature,
+        "custom_id_to_example_id": custom_id_to_example_id,
+        "request_count": len(requests),
+        "status": response.get("processing_status"),
+        "response": response,
+    }
+    write_json(state_path, state)
+    print(f"Submitted Anthropic batch {response['id']} with {len(requests)} requests")
+    return state
+
+
+def poll_anthropic_batch(batch_id: str) -> dict[str, object]:
+    poll_seconds = int(os.environ.get("REALISTIC_BFCL_BATCH_POLL_SECONDS", "30"))
+    max_wait_seconds = int(os.environ.get("REALISTIC_BFCL_BATCH_MAX_WAIT_SECONDS", "3600"))
+    deadline = time.time() + max_wait_seconds
+    url = f"{ANTHROPIC_MESSAGE_BATCHES_URL}/{batch_id}"
+
+    while True:
+        response = anthropic_request_json("GET", url, anthropic_api_key())
+        status = response.get("processing_status")
+        counts = response.get("request_counts", {})
+        print(f"Anthropic batch {batch_id}: {status} {counts}")
+        if status == "ended":
+            return response
+        if time.time() >= deadline:
+            raise SystemExit(
+                f"Anthropic batch {batch_id} is still {status}; rerun to resume later."
+            )
+        time.sleep(poll_seconds)
+
+
+def read_anthropic_batch_results(batch_id: str) -> list[dict[str, object]]:
+    url = f"{ANTHROPIC_MESSAGE_BATCHES_URL}/{batch_id}/results"
+    text = anthropic_request_text("GET", url, anthropic_api_key())
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def run_or_load_anthropic_batch_predictions(
+    examples: list[dict[str, object]],
+    model_predictions_path: Path,
+    model: ModelRun,
+    expected_fingerprints: dict[object, str],
+    cached_predictions: dict[object, dict[str, object]],
+) -> dict[object, dict[str, object]]:
+    state = create_or_load_anthropic_batch(examples, model_predictions_path, model)
+    batch_response = poll_anthropic_batch(str(state["batch_id"]))
+    results = read_anthropic_batch_results(str(state["batch_id"]))
+    custom_id_to_example_id = state["custom_id_to_example_id"]
+    examples_by_id = {example["id"]: example for example in examples}
+    predictions = []
+    failed_example_ids = []
+
+    for result in results:
+        custom_id = result["custom_id"]
+        example_id = custom_id_to_example_id.get(custom_id)
+        if example_id is None:
+            raise SystemExit(f"Anthropic batch returned unknown custom_id: {custom_id}")
+        result_payload = result.get("result", {})
+        if result_payload.get("type") != "succeeded":
+            failed_example_ids.append(example_id)
+            print(
+                "Anthropic batch request failed for "
+                f"{example_id}: {json.dumps(result_payload, sort_keys=True)}"
+            )
+            continue
+        response = result_payload["message"]
+        calls = function_calls(response, examples_by_id[example_id], model)
+        eval_result = bfcl_ast_result(examples_by_id[example_id], calls, model)
+        predictions.append(
+            {
+                "id": example_id,
+                "model": model.id,
+                "provider": model.provider,
+                "temperature": model.temperature,
+                "prediction": calls,
+                "correct": eval_result["valid"],
+                "evaluator": "bfcl_ast_checker",
+                "eval_result": eval_result,
+                "response_id": response.get("id"),
+                "usage": response.get("usage"),
+                "input_fingerprint": expected_fingerprints[example_id],
+            }
+        )
+
+    for prediction in predictions:
+        cached_predictions[prediction["id"]] = prediction
+    write_jsonl(model_predictions_path, list(cached_predictions.values()))
+
+    for example_id in failed_example_ids:
+        prediction = run_model_prediction(examples_by_id[example_id], model)
+        prediction["input_fingerprint"] = expected_fingerprints[example_id]
+        cached_predictions[example_id] = prediction
+        append_jsonl(model_predictions_path, prediction)
+        print(f"Retried failed batch request synchronously for {example_id}")
+
+    state_path = anthropic_batch_state_path(model_predictions_path)
+    state["status"] = "completed"
+    state["completed_at"] = utc_now()
+    state["response"] = batch_response
+    state["failed_request_count"] = len(failed_example_ids)
+    write_json(state_path, state)
+    print(
+        f"Loaded {len(predictions)} predictions from Anthropic batch {state['batch_id']}"
+    )
+    return cached_predictions
 
 
 def tool_name_map(example: dict[str, object]) -> dict[str, str]:
@@ -247,6 +706,73 @@ def response_function_calls(
     return calls
 
 
+def chat_response_function_calls(
+    response: dict[str, object], name_map: dict[str, str]
+) -> list[dict[str, object]]:
+    choices = response.get("choices", [])
+    if not isinstance(choices, list) or not choices:
+        return []
+    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+    tool_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
+    calls = []
+    for item in tool_calls:
+        if not isinstance(item, dict):
+            continue
+        function = item.get("function", {})
+        if not isinstance(function, dict):
+            continue
+        try:
+            arguments = json.loads(function.get("arguments") or "{}")
+        except json.JSONDecodeError:
+            arguments = {"__malformed_arguments__": function.get("arguments")}
+        name = str(function.get("name"))
+        calls.append({"name": name_map.get(name, name), "arguments": arguments})
+    return calls
+
+
+def anthropic_response_function_calls(
+    response: dict[str, object],
+    name_map: dict[str, str],
+    argument_schema_maps: dict[str, object],
+) -> list[dict[str, object]]:
+    calls = []
+    content = response.get("content", [])
+    if not isinstance(content, list):
+        return calls
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "tool_use":
+            continue
+        arguments = item.get("input", {})
+        if not isinstance(arguments, dict):
+            arguments = {"__non_dict_arguments__": arguments}
+        name = str(item.get("name"))
+        restored_arguments = restore_anthropic_arguments(
+            arguments,
+            argument_schema_maps.get(name, {}),
+        )
+        calls.append({"name": name_map.get(name, name), "arguments": restored_arguments})
+    return calls
+
+
+def function_calls(
+    response: dict[str, object],
+    example: dict[str, object],
+    model: ModelRun,
+) -> list[dict[str, object]]:
+    name_map = tool_name_map(example)
+    if model.provider == "openai":
+        return response_function_calls(response, name_map)
+    if model.provider in {"anthropic", "claude"}:
+        return anthropic_response_function_calls(
+            response,
+            name_map,
+            anthropic_argument_schema_maps(example),
+        )
+    if model.provider in {"xai", "grok"}:
+        return chat_response_function_calls(response, name_map)
+    raise SystemExit(f"Unsupported evaluation provider for {model.id}: {model.provider}")
+
+
 def load_bfcl_ast_checker() -> tuple[object, object]:
     eval_root = str(bfcl_eval_root())
     if eval_root not in sys.path:
@@ -256,10 +782,14 @@ def load_bfcl_ast_checker() -> tuple[object, object]:
     # Importing the full upstream model registry pulls every provider SDK.
     if "bfcl_eval.constants.model_config" not in sys.modules:
         model_config = types.ModuleType("bfcl_eval.constants.model_config")
-        model_config.MODEL_CONFIG_MAPPING = {
-            OPENAI_MODEL: types.SimpleNamespace(underscore_to_dot=False)
-        }
+        model_config.MODEL_CONFIG_MAPPING = {}
         sys.modules["bfcl_eval.constants.model_config"] = model_config
+    sys.modules["bfcl_eval.constants.model_config"].MODEL_CONFIG_MAPPING.update(
+        {
+            model.id: types.SimpleNamespace(underscore_to_dot=False)
+            for model in configured_model_runs()
+        }
+    )
 
     ast_checker = importlib.import_module("bfcl_eval.eval_checker.ast_eval.ast_checker").ast_checker
     language = importlib.import_module("bfcl_eval.constants.enums").Language.PYTHON
@@ -271,7 +801,7 @@ def bfcl_model_output(calls: list[dict[str, object]]) -> list[dict[str, object]]
 
 
 def bfcl_ast_result(
-    example: dict[str, object], calls: list[dict[str, object]]
+    example: dict[str, object], calls: list[dict[str, object]], model: ModelRun
 ) -> dict[str, object]:
     ast_checker, language = load_bfcl_ast_checker()
     return ast_checker(
@@ -280,7 +810,7 @@ def bfcl_ast_result(
         example["ground_truth"],
         language,
         str(example["category"]),
-        OPENAI_MODEL,
+        model.id,
     )
 
 
@@ -296,10 +826,12 @@ def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
     return totals
 
 
-def input_fingerprint(example: dict[str, object]) -> str:
+def input_fingerprint(example: dict[str, object], model: ModelRun) -> str:
     return stable_hash(
         {
-            "model": OPENAI_MODEL,
+            "model": model.id,
+            "provider": model.provider,
+            "temperature": model.temperature,
             "question": example["question"],
             "function": example["function"],
             "ground_truth": example["ground_truth"],
@@ -337,9 +869,11 @@ def category_metrics(
 
 
 def run_or_load_model_predictions(
-    examples: list[dict[str, object]], model_predictions_path: Path
+    examples: list[dict[str, object]], model_predictions_path: Path, model: ModelRun
 ) -> list[dict[str, object]]:
-    expected_fingerprints = {example["id"]: input_fingerprint(example) for example in examples}
+    expected_fingerprints = {
+        example["id"]: input_fingerprint(example, model) for example in examples
+    }
     if model_predictions_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_MODEL_RUN"):
         cached_predictions = {}
         stale_count = 0
@@ -350,7 +884,7 @@ def run_or_load_model_predictions(
                 continue
             cached_predictions[prediction_id] = prediction
         print(
-            f"Loaded {len(cached_predictions)} cached {OPENAI_MODEL} predictions "
+            f"Loaded {len(cached_predictions)} cached {model.id} predictions "
             f"({stale_count} stale ignored)"
         )
     else:
@@ -358,26 +892,38 @@ def run_or_load_model_predictions(
 
     missing_examples = [example for example in examples if example["id"] not in cached_predictions]
     if missing_examples:
-        api_key = openai_api_key()
-        concurrency = min(openai_concurrency(), len(missing_examples))
-        print(
-            f"Running {len(missing_examples)} missing {OPENAI_MODEL} calls "
-            f"at concurrency {concurrency}"
-        )
-        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {
-                executor.submit(run_openai_prediction, example, api_key): example
-                for example in missing_examples
-            }
-            for future in concurrent.futures.as_completed(futures):
-                example = futures[future]
-                prediction = future.result()
-                prediction["input_fingerprint"] = expected_fingerprints[example["id"]]
-                cached_predictions[example["id"]] = prediction
-                append_jsonl(model_predictions_path, prediction)
-                print(f"Ran {OPENAI_MODEL} on {example['id']}")
+        if use_batch_backend(model):
+            print(
+                f"Running {len(missing_examples)} missing {model.id} calls "
+                "through Anthropic batch"
+            )
+            cached_predictions = run_or_load_anthropic_batch_predictions(
+                missing_examples,
+                model_predictions_path,
+                model,
+                expected_fingerprints,
+                cached_predictions,
+            )
+        else:
+            concurrency = min(openai_concurrency(), len(missing_examples))
+            print(
+                f"Running {len(missing_examples)} missing {model.id} calls "
+                f"at concurrency {concurrency}"
+            )
+            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+                futures = {
+                    executor.submit(run_model_prediction, example, model): example
+                    for example in missing_examples
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    example = futures[future]
+                    prediction = future.result()
+                    prediction["input_fingerprint"] = expected_fingerprints[example["id"]]
+                    cached_predictions[example["id"]] = prediction
+                    append_jsonl(model_predictions_path, prediction)
+                    print(f"Ran {model.id} on {example['id']}")
     else:
-        print(f"All {OPENAI_MODEL} predictions were cached")
+        print(f"All {model.id} predictions were cached")
 
     missing_ids = [example["id"] for example in examples if example["id"] not in cached_predictions]
     if missing_ids:
@@ -388,7 +934,7 @@ def run_or_load_model_predictions(
     rescored_predictions = []
     for prediction in predictions:
         calls = prediction["prediction"]
-        eval_result = bfcl_ast_result(examples_by_id[prediction["id"]], calls)
+        eval_result = bfcl_ast_result(examples_by_id[prediction["id"]], calls, model)
         rescored_prediction = dict(prediction)
         rescored_prediction["correct"] = eval_result["valid"]
         rescored_prediction["evaluator"] = "bfcl_ast_checker"
@@ -416,7 +962,7 @@ def result_suffix() -> str:
 
 
 def load_current_clean_predictions(
-    clean_predictions_path: Path, base_ids: set[str]
+    clean_predictions_path: Path, base_ids: set[str], model: ModelRun
 ) -> dict[str, dict[str, object]]:
     clean_subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     if not clean_subset_path.exists():
@@ -432,7 +978,8 @@ def load_current_clean_predictions(
         raise SystemExit(f"Clean subset is missing paired base ids: {missing_examples[:10]}")
 
     expected_fingerprints = {
-        example_id: input_fingerprint(example) for example_id, example in clean_examples.items()
+        example_id: input_fingerprint(example, model)
+        for example_id, example in clean_examples.items()
     }
     clean_predictions = {
         prediction["id"]: prediction for prediction in read_jsonl(clean_predictions_path)
@@ -457,13 +1004,15 @@ def load_current_clean_predictions(
     return {prediction_id: clean_predictions[prediction_id] for prediction_id in base_ids}
 
 
-def run_openai_prediction(example: dict[str, object], api_key: str) -> dict[str, object]:
-    response = call_openai_tool_router(example, api_key)
-    calls = response_function_calls(response, tool_name_map(example))
-    eval_result = bfcl_ast_result(example, calls)
+def run_model_prediction(example: dict[str, object], model: ModelRun) -> dict[str, object]:
+    response = call_tool_router(example, model)
+    calls = function_calls(response, example, model)
+    eval_result = bfcl_ast_result(example, calls, model)
     return {
         "id": example["id"],
-        "model": OPENAI_MODEL,
+        "model": model.id,
+        "provider": model.provider,
+        "temperature": model.temperature,
         "prediction": calls,
         "correct": eval_result["valid"],
         "evaluator": "bfcl_ast_checker",
@@ -471,6 +1020,29 @@ def run_openai_prediction(example: dict[str, object], api_key: str) -> dict[str,
         "response_id": response.get("id"),
         "usage": response.get("usage"),
     }
+
+
+def clean_examples_for_current_run() -> list[dict[str, object]]:
+    subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+    examples = read_jsonl(subset_path)
+    limit = optional_positive_int_env("REALISTIC_BFCL_EVAL_LIMIT")
+    if limit is None:
+        return examples
+
+    dimensions = generated_dimensions()
+    base_ids: set[str] = set()
+    for dimension in dimensions:
+        noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
+        base_ids.update(str(row["base_id"]) for row in read_jsonl(noisy_path)[:limit])
+    if not base_ids:
+        return examples[:limit]
+
+    filtered_examples = [example for example in examples if str(example["id"]) in base_ids]
+    print(
+        f"Limiting clean baseline to {len(filtered_examples)} base examples "
+        f"needed by paired eval limit {limit}"
+    )
+    return filtered_examples
 
 
 def freeze_bfcl() -> None:
@@ -512,7 +1084,15 @@ def freeze_bfcl() -> None:
             },
             "model_list": {
                 "status": "configured",
-                "models": [OPENAI_MODEL],
+                "models": [
+                    {
+                        "id": model.id,
+                        "provider": model.provider,
+                        "tier": model.tier,
+                        "temperature": model.temperature,
+                    }
+                    for model in configured_model_runs()
+                ],
             },
             "status": "source_pinned_subset_materialized",
             "notes": [
@@ -533,7 +1113,7 @@ def clean_baseline() -> None:
         clean_results_dir = clean_results_dir / suffix
     result_path = clean_results_dir / "clean_baseline_summary.json"
     oracle_predictions_path = clean_results_dir / "oracle_replay_predictions.jsonl"
-    model_predictions_path = clean_results_dir / f"{OPENAI_MODEL}_predictions.jsonl"
+    models = configured_model_runs()
 
     if not manifest_path.exists():
         raise SystemExit("Missing artifacts/frozen/bfcl_manifest.json. Run prepare-subset first.")
@@ -541,7 +1121,7 @@ def clean_baseline() -> None:
         raise SystemExit("Missing artifacts/frozen/clean_subset.jsonl. Run prepare-subset first.")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    examples = read_jsonl(subset_path)
+    examples = clean_examples_for_current_run()
     predictions = [
         {
             "id": example["id"],
@@ -554,11 +1134,23 @@ def clean_baseline() -> None:
     write_jsonl(oracle_predictions_path, predictions)
 
     examples_by_id = {example["id"]: example for example in examples}
-    model_predictions = run_or_load_model_predictions(examples, model_predictions_path)
     oracle_metrics = accuracy_metrics(predictions)
-    model_metrics = accuracy_metrics(model_predictions)
     oracle_metrics["usage"] = {}
-    model_metrics["usage"] = aggregate_usage(model_predictions)
+    model_metrics = {}
+    model_category_metrics = {}
+    model_prediction_paths = {}
+    for model in models:
+        model_predictions_path = clean_results_dir / f"{model.filename}_predictions.jsonl"
+        model_predictions = run_or_load_model_predictions(
+            examples, model_predictions_path, model
+        )
+        metrics = accuracy_metrics(model_predictions)
+        metrics["usage"] = aggregate_usage(model_predictions)
+        model_metrics[model.id] = metrics
+        model_category_metrics[model.id] = category_metrics(model_predictions, examples_by_id)
+        model_prediction_paths[model.id] = model_predictions_path.relative_to(
+            REPO_ROOT
+        ).as_posix()
 
     write_json(
         result_path,
@@ -566,22 +1158,23 @@ def clean_baseline() -> None:
             "created_at": utc_now(),
             "stage": "run-bfcl",
             "status": "ran_model_baseline",
-            "reason": "Ran oracle replay and a real OpenAI model baseline.",
+            "reason": "Ran oracle replay and configured model baselines.",
             "bfcl_manifest": "artifacts/frozen/bfcl_manifest.json",
             "bfcl_dataset_commit": manifest["bfcl"]["dataset_commit"],
             "predictions": {
                 "oracle_replay": oracle_predictions_path.relative_to(REPO_ROOT).as_posix(),
-                OPENAI_MODEL: model_predictions_path.relative_to(REPO_ROOT).as_posix(),
+                **model_prediction_paths,
             },
-            "models": ["oracle_replay", OPENAI_MODEL],
+            "models": ["oracle_replay", *[model.id for model in models]],
             "metrics": {
                 "oracle_replay": oracle_metrics,
-                OPENAI_MODEL: model_metrics,
+                **model_metrics,
             },
             "category_metrics": {
                 "oracle_replay": category_metrics(predictions, examples_by_id),
-                OPENAI_MODEL: category_metrics(model_predictions, examples_by_id),
+                **model_category_metrics,
             },
+            "temperature": models[0].temperature if models else None,
             "next_required_work": [
                 "Compare this clean baseline against noisy variants.",
             ],
@@ -649,22 +1242,22 @@ def generated_dimensions() -> list[str]:
     return [dimension for dimension in dimensions if dimension in requested_dimensions]
 
 
-def paired_eval_dimension(dimension: str) -> dict[str, object]:
+def paired_eval_dimension(dimension: str, model: ModelRun) -> dict[str, object]:
     noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
     clean_results_dir = REPO_ROOT / "artifacts/results/clean"
     suffix = result_suffix()
     if suffix:
         clean_results_dir = clean_results_dir / suffix
-    clean_predictions_path = clean_results_dir / f"{OPENAI_MODEL}_predictions.jsonl"
+    clean_predictions_path = clean_results_dir / f"{model.filename}_predictions.jsonl"
     limit = optional_positive_int_env("REALISTIC_BFCL_EVAL_LIMIT")
     noisy_results_dir = REPO_ROOT / f"artifacts/results/noisy/{dimension}"
     paired_results_dir = REPO_ROOT / f"artifacts/results/paired/{dimension}"
     if suffix:
         noisy_results_dir = noisy_results_dir / suffix
         paired_results_dir = paired_results_dir / suffix
-    noisy_predictions_path = noisy_results_dir / f"{OPENAI_MODEL}_predictions.jsonl"
-    paired_path = paired_results_dir / f"{OPENAI_MODEL}_paired.jsonl"
-    summary_path = paired_results_dir / f"{OPENAI_MODEL}_summary.json"
+    noisy_predictions_path = noisy_results_dir / f"{model.filename}_predictions.jsonl"
+    paired_path = paired_results_dir / f"{model.filename}_paired.jsonl"
+    summary_path = paired_results_dir / f"{model.filename}_summary.json"
 
     if not clean_predictions_path.exists():
         raise SystemExit("Missing clean model predictions. Run run-bfcl first.")
@@ -679,8 +1272,11 @@ def paired_eval_dimension(dimension: str) -> dict[str, object]:
     clean_predictions = load_current_clean_predictions(
         clean_predictions_path,
         {str(noisy_example["base_id"]) for noisy_example in noisy_examples},
+        model,
     )
-    noisy_predictions = run_or_load_model_predictions(noisy_examples, noisy_predictions_path)
+    noisy_predictions = run_or_load_model_predictions(
+        noisy_examples, noisy_predictions_path, model
+    )
     noisy_predictions_by_id = {prediction["id"]: prediction for prediction in noisy_predictions}
 
     paired_rows = []
@@ -709,7 +1305,10 @@ def paired_eval_dimension(dimension: str) -> dict[str, object]:
         {
             "created_at": utc_now(),
             "stage": "run-bfcl",
-            "model": OPENAI_MODEL,
+            "model": model.id,
+            "provider": model.provider,
+            "tier": model.tier,
+            "temperature": model.temperature,
             "dimension": dimension,
             "clean_predictions": clean_predictions_path.relative_to(REPO_ROOT).as_posix(),
             "noisy_predictions": noisy_predictions_path.relative_to(REPO_ROOT).as_posix(),
@@ -734,16 +1333,27 @@ def paired_eval() -> None:
         raise SystemExit("No generated noisy dimensions found. Run augment first.")
     suffix = result_suffix()
     limit = optional_positive_int_env("REALISTIC_BFCL_EVAL_LIMIT")
-    summary_name = (
-        f"{OPENAI_MODEL}_summary_{suffix}.json" if suffix else f"{OPENAI_MODEL}_summary.json"
-    )
-    summaries = [paired_eval_dimension(dimension) for dimension in dimensions]
+    models = configured_model_runs()
+    summary_name = f"summary_{suffix}.json" if suffix else "summary.json"
+    summaries = [
+        paired_eval_dimension(dimension, model)
+        for model in models
+        for dimension in dimensions
+    ]
     write_json(
         REPO_ROOT / f"artifacts/results/paired/{summary_name}",
         {
             "created_at": utc_now(),
             "stage": "run-bfcl",
-            "model": OPENAI_MODEL,
+            "models": [
+                {
+                    "id": model.id,
+                    "provider": model.provider,
+                    "tier": model.tier,
+                    "temperature": model.temperature,
+                }
+                for model in models
+            ],
             "eval_limit": limit,
             "dimensions": summaries,
         },

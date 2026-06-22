@@ -125,6 +125,7 @@ STAGES: tuple[Stage, ...] = (
         outputs=(
             "artifacts/analysis/benchmark_summary.csv",
             "artifacts/analysis/benchmark_summary.json",
+            "artifacts/analysis/model_comparison.csv",
             "artifacts/analysis/flip_review.csv",
             "artifacts/analysis/regression_review.csv",
             "artifacts/analysis/article_failure_review.csv",

@@ -3,6 +3,12 @@
 These files organize the full-pool gpt-5.4-nano evaluation for article writing.
 Article counts exclude rows marked as possible oracle, augmentation, or baseline dataset issues, plus manually reviewed artifact/questionable rows.
 
+The Haiku files are raw model-comparison summaries for
+`claude-haiku-4-5-20251001`. They use the same frozen 2,351-example pool and
+seven dimensions, but the full-pool Haiku regressions have not yet been manually
+reviewed. The Haiku paired stats include exact McNemar p-values so weak or
+near-balanced dimensions are visible rather than overclaimed.
+
 ## Dimension Results
 
 | Dimension | Clean acc. | Noisy acc. | Drop | Article regressions | Article rate |
@@ -45,3 +51,7 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 - `included_failure_examples.csv`: reviewed qualitative examples for the article.
 - `realism_audit_summary.csv`: first-pass researcher audit of reviewed failure candidates.
 - `oracle_issue_examples.csv`: examples to exclude or discuss as evaluator/oracle ambiguity.
+- `haiku_full_pool_summary.csv`: raw full-pool Haiku paired metrics.
+- `haiku_full_pool_summary.json`: JSON form of the raw full-pool Haiku metrics.
+- `haiku_full_pool_paired_stats.csv`: Haiku clean->noisy vs noisy->clean counts and exact McNemar p-values.
+- `haiku_full_pool_paired_stats.json`: JSON form of the Haiku paired stats.

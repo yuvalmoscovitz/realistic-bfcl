@@ -124,6 +124,70 @@ How often did ordinary prompt messiness break a tool call that already worked?
 This small study is a probe, not a leaderboard. Its purpose is to expose a
 failure surface and motivate more realistic robustness testing for tool routers.
 
+## A Mid-Model Check
+
+The first result above used one cheap model, so I also ran the same frozen
+2,351-example pool on `claude-haiku-4-5-20251001` through Anthropic Message
+Batches at temperature `0`.
+
+This was not a new benchmark version. The prompts, schemas, gold answers, and
+seven dimensions were the same. Only the model changed.
+
+Raw Haiku results:
+
+| Noise type | Clean acc. | Noisy acc. | Drop | Clean ok -> noisy fail | Clean fail -> noisy ok | McNemar p |
+|---|---:|---:|---:|---:|---:|---:|
+| `telegraphic_request` | 0.832 | 0.817 | 0.014 | 51 | 17 | 0.000045 |
+| `cursing` | 0.832 | 0.824 | 0.008 | 30 | 12 | 0.007916 |
+| `irrelevant_context` | 0.832 | 0.825 | 0.006 | 29 | 14 | 0.031540 |
+| `argumentative_challenge` | 0.832 | 0.827 | 0.005 | 23 | 12 | 0.089531 |
+| `removed_spaces` | 0.832 | 0.829 | 0.002 | 13 | 8 | 0.383310 |
+| `typos` | 0.832 | 0.830 | 0.001 | 12 | 9 | 0.663624 |
+| `pasted_context_block` | 0.832 | 0.831 | 0.001 | 26 | 24 | 0.887725 |
+
+Pooled across all seven dimensions:
+
+```text
+paired rows:             16,457
+clean accuracy:          0.832
+noisy accuracy:          0.826
+raw drop:                0.005
+clean -> noisy failures: 184
+noisy fixes clean:       96
+```
+
+The Haiku result disciplines the claim. The effect is much smaller than the
+nano result and is not uniform across noise types. `telegraphic_request` is the
+cleanest raw Haiku signal: 51 clean-success/noisy-failure cases versus 17
+clean-failure/noisy-success cases. `cursing` and `irrelevant_context` are also
+directional before manual review. But `pasted_context_block`, `typos`, and
+`removed_spaces` are near-balanced for Haiku.
+
+That suggests a more careful story: phrasing brittleness is strongest on the
+cheap model, shrinks on a stronger mid-tier model, and does not disappear
+entirely. Telegraphic shorthand is the clearest remaining failure surface in
+this run.
+
+The full-pool Haiku regressions have not yet been manually reviewed. On the
+250-example Haiku pilot, many raw flips were baseline/oracle ambiguities such
+as `giant panda` vs. `panda`, `Adidas` vs. `阿迪达斯`, or `brownies` vs.
+`dessert`. So the Haiku table should be read as a raw paired robustness result,
+not as a final true-failure count.
+
+The checked-in raw summary is in:
+
+```text
+artifacts/analysis/article/haiku_full_pool_summary.csv
+artifacts/analysis/article/haiku_full_pool_summary.json
+artifacts/analysis/article/haiku_full_pool_paired_stats.csv
+artifacts/analysis/article/haiku_full_pool_paired_stats.json
+```
+
+The paired stats files were added specifically to avoid overstating weak
+dimensions. They report the two discordant directions separately and use an
+exact McNemar test, so dimensions like `pasted_context_block` are visible as
+near-balanced rather than being folded into one pooled degradation number.
+
 ## What The Failures Look Like
 
 Most failures were not dramatic.

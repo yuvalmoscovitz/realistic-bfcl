@@ -61,6 +61,17 @@ clean prompts.
 This repository currently supports a problem-posing article, not a complete
 multi-model benchmark paper.
 
+We also ran `claude-haiku-4-5-20251001` on the same 2,351-example pool through
+Anthropic Message Batches at temperature `0`. Haiku's clean accuracy was `0.832`;
+pooled noisy accuracy across the seven dimensions was `0.826`, a raw drop of
+`0.005`. The effect is much smaller than the nano run and is not uniformly
+directional across dimensions. The cleanest Haiku signal is
+`telegraphic_request`: 51 clean-success/noisy-failure cases versus 17
+clean-failure/noisy-success cases, McNemar exact `p = 0.000045`. Several other
+dimensions are weak or near-balanced. The full-pool Haiku regressions have not
+yet been manually reviewed, so treat these as raw paired metrics, not final
+true-failure rates.
+
 We also ran a controlled 250-example comparison on a rewrite-suitable subset.
 Deterministic augmentations are the auditable control surface: easy to
 reproduce, inspect, and reject when they touch oracle-bearing content. LLM
@@ -94,7 +105,7 @@ docs/
   evaluation_metrics.md        Paired metrics and error taxonomy.
 src/realistic_bfcl/
   augment.py                   Noisy dataset construction and invariant checks.
-  evaluate.py                  BFCL/OpenAI evaluation, scoring, cache, pairing.
+  evaluate.py                  BFCL evaluation, provider adapters, batch/cache, pairing.
   analyze.py                   Degradation metrics and regression review files.
   common.py                    Shared constants and small file/config helpers.
   pipeline.py                  Thin CLI orchestration for the four research steps.
@@ -173,11 +184,18 @@ REALISTIC_BFCL_LLM_DIMENSIONS=llm_super_casual_abbreviations,llm_frustrated_swea
 ```
 
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
-AST checker, cache, and parallel OpenAI calls.
+AST checker, cache, and parallel model calls. The model list and temperature are
+configured in `configs/project.yaml`; temperature is recorded in run metadata and
+included in cache fingerprints. Each model writes its own cache files, so one
+frozen noisy dataset can be evaluated across small, mid-tier, and frontier
+models without regenerating augmentations.
 
 `analyze` writes paired degradation metrics and review files under
 `artifacts/analysis/`, including raw and adjusted degradation plus
-`strong_failure_examples.csv` for qualitative inspection.
+`strong_failure_examples.csv` for qualitative inspection. It also writes
+`model_comparison.csv`, a per-model/per-dimension table with clean accuracy,
+noisy accuracy, degradation, clean-success/noisy-failure counts, reviewed
+regression counts, and failure-type taxonomy.
 
 To inspect all registered steps:
 
@@ -195,7 +213,22 @@ python scripts/run_stage.py run-bfcl --dry-run
 Set `REALISTIC_BFCL_BFCL_ROOT=/path/to/gorilla` when the checkout is not in the
 default local inspection path.
 
-`run-bfcl` runs `oracle_replay` and `gpt-5.4-nano`. Provide the OpenAI key
-through `OPENAI_API_KEY`, `REALISTIC_BFCL_ENV_FILE=/path/to/.env`, or a sibling
-`../underlayer/.env` file. Missing model predictions run in parallel with
-`REALISTIC_BFCL_CONCURRENCY`, which defaults to `8`.
+`run-bfcl` runs `oracle_replay` and the models listed in
+`configs/project.yaml`. API keys can be provided through the environment,
+`REALISTIC_BFCL_ENV_FILE=/path/to/.env`, or a sibling `../underlayer/.env` file.
+Missing synchronous predictions run in parallel with `REALISTIC_BFCL_CONCURRENCY`,
+which defaults to `8`.
+
+Anthropic models can also run through Message Batches, which is the practical
+path for larger model comparisons:
+
+```bash
+REALISTIC_BFCL_EXECUTION=batch \
+REALISTIC_BFCL_MODELS=anthropic:claude-haiku-4-5-20251001:mid \
+python scripts/run_stage.py run-bfcl
+```
+
+Batch runs write the same prediction caches and paired summaries as synchronous
+runs, plus a small `_batch_state.json` file for resuming submitted batches. The
+Anthropic adapter also sanitizes provider-incompatible BFCL schema argument
+names, then restores the original argument names before BFCL scoring.
