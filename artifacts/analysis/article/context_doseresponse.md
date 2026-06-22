@@ -4,6 +4,7 @@ This is a small directional probe, separate from the main seven-dimension articl
 
 | Model | Run | Small flips | Medium flips | Large flips | Monotonic? |
 |---|---|---:|---:|---:|---|
+| claude-haiku-4-5-20251001 | context_dose_haiku_stratified_250_limit_250 | 4 | 3 | 3 | no |
 | gpt-5.4-nano | context_dose_gpt_stratified_250_limit_250 | 25 | 22 | 17 | no |
 
 Interpretation rule: this file reports raw paired flips only. Treat it as a probe for context-length directionality, not as manually reviewed evidence.
