@@ -22,6 +22,7 @@ from .common import (
     DIMENSION_FILES,
     OPENAI_MAX_ATTEMPTS,
     OPENAI_RESPONSES_URL,
+    OPENROUTER_CHAT_COMPLETIONS_URL,
     REPO_ROOT,
     RETRYABLE_HTTP_STATUS,
     ROUTER_MAX_OUTPUT_TOKENS,
@@ -36,6 +37,7 @@ from .common import (
     file_sha256,
     openai_api_key,
     openai_concurrency,
+    openrouter_api_key,
     optional_positive_int_env,
     read_int_setting,
     read_jsonl,
@@ -329,6 +331,29 @@ def openai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, obj
 
 
 def xai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object]:
+    return chat_completion_retry_json(
+        payload,
+        api_key,
+        XAI_CHAT_COMPLETIONS_URL,
+        "xAI",
+    )
+
+
+def openrouter_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object]:
+    return chat_completion_retry_json(
+        payload,
+        api_key,
+        OPENROUTER_CHAT_COMPLETIONS_URL,
+        "OpenRouter",
+    )
+
+
+def chat_completion_retry_json(
+    payload: dict[str, object],
+    api_key: str,
+    url: str,
+    provider_label: str,
+) -> dict[str, object]:
     request_data = json.dumps(payload).encode("utf-8")
     request_headers = {
         "Authorization": f"Bearer {api_key}",
@@ -336,7 +361,7 @@ def xai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object
     }
     for attempt in range(1, OPENAI_MAX_ATTEMPTS + 1):
         request = urllib.request.Request(
-            XAI_CHAT_COMPLETIONS_URL,
+            url,
             data=request_data,
             headers=request_headers,
             method="POST",
@@ -349,14 +374,16 @@ def xai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object
             if error.code in RETRYABLE_HTTP_STATUS and attempt < OPENAI_MAX_ATTEMPTS:
                 time.sleep(openai_retry_delay(error, body, attempt))
                 continue
-            raise RuntimeError(f"xAI API request failed: HTTP {error.code}: {body}") from error
+            raise RuntimeError(
+                f"{provider_label} API request failed: HTTP {error.code}: {body}"
+            ) from error
         except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
             if attempt < OPENAI_MAX_ATTEMPTS:
                 time.sleep(min(60, 2**attempt))
                 continue
-            raise RuntimeError(f"xAI API request failed: {error}") from error
+            raise RuntimeError(f"{provider_label} API request failed: {error}") from error
 
-    raise RuntimeError("xAI API request failed without returning a response.")
+    raise RuntimeError(f"{provider_label} API request failed without returning a response.")
 
 
 def anthropic_retry_json(payload: dict[str, object], api_key: str) -> dict[str, object]:
@@ -483,6 +510,50 @@ def call_xai_tool_router(example: dict[str, object], model: ModelRun) -> dict[st
     return xai_retry_json(payload, xai_api_key())
 
 
+def openrouter_provider_routing() -> dict[str, object]:
+    routing: dict[str, object] = {
+        "require_parameters": True,
+        "allow_fallbacks": False,
+    }
+    order = os.environ.get("REALISTIC_BFCL_OPENROUTER_PROVIDER_ORDER", "").strip()
+    if order:
+        routing["order"] = [item.strip() for item in order.split(",") if item.strip()]
+    only = os.environ.get("REALISTIC_BFCL_OPENROUTER_PROVIDER_ONLY", "").strip()
+    if only:
+        routing["only"] = [item.strip() for item in only.split(",") if item.strip()]
+    allow_fallbacks = os.environ.get("REALISTIC_BFCL_OPENROUTER_ALLOW_FALLBACKS", "")
+    if allow_fallbacks:
+        routing["allow_fallbacks"] = allow_fallbacks.strip().lower() in {"1", "true", "yes"}
+    return routing
+
+
+def call_openrouter_tool_router(example: dict[str, object], model: ModelRun) -> dict[str, object]:
+    tools = []
+    for index, function_doc in enumerate(example["function"]):
+        tools.append(
+            chat_completion_tool(
+                function_doc,
+                safe_tool_name(str(function_doc["name"]), index),
+            )
+        )
+    payload = {
+        "model": model.id,
+        "messages": [
+            {
+                "role": "system",
+                "content": ROUTER_SYSTEM_INSTRUCTION,
+            },
+            *bfcl_messages(example),
+        ],
+        "tools": tools,
+        "tool_choice": "required",
+        "temperature": model.temperature,
+        "max_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+        "provider": openrouter_provider_routing(),
+    }
+    return openrouter_retry_json(payload, openrouter_api_key())
+
+
 def anthropic_messages_payload(
     example: dict[str, object], model: ModelRun
 ) -> dict[str, object]:
@@ -516,6 +587,8 @@ def call_tool_router(example: dict[str, object], model: ModelRun) -> dict[str, o
         return call_anthropic_tool_router(example, model)
     if model.provider in {"xai", "grok"}:
         return call_xai_tool_router(example, model)
+    if model.provider == "openrouter":
+        return call_openrouter_tool_router(example, model)
     raise SystemExit(f"Unsupported evaluation provider for {model.id}: {model.provider}")
 
 
@@ -768,7 +841,7 @@ def function_calls(
             name_map,
             anthropic_argument_schema_maps(example),
         )
-    if model.provider in {"xai", "grok"}:
+    if model.provider in {"xai", "grok", "openrouter"}:
         return chat_response_function_calls(response, name_map)
     raise SystemExit(f"Unsupported evaluation provider for {model.id}: {model.provider}")
 
