@@ -25,7 +25,18 @@ ROUTER_SYSTEM_INSTRUCTION = (
     "Do not answer in prose when a tool call is appropriate."
 )
 ROUTER_TOOL_CHOICE = "required"
-ROUTER_MAX_OUTPUT_TOKENS = 256
+DEFAULT_ROUTER_MAX_OUTPUT_TOKENS = 256
+try:
+    ROUTER_MAX_OUTPUT_TOKENS = int(
+        os.environ.get(
+            "REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS",
+            str(DEFAULT_ROUTER_MAX_OUTPUT_TOKENS),
+        )
+    )
+except ValueError as error:
+    raise SystemExit("REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS must be an integer.") from error
+if ROUTER_MAX_OUTPUT_TOKENS < 1:
+    raise SystemExit("REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS must be >= 1.")
 ROUTER_MESSAGE_SERIALIZATION = "preserve_bfcl_turns_v1"
 RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
 BFCL_CATEGORY_FILES = {
