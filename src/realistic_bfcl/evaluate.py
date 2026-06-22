@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import http.client
 import importlib
 import json
 import os
@@ -321,7 +322,13 @@ def openai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, obj
                 time.sleep(openai_retry_delay(error, body, attempt))
                 continue
             raise RuntimeError(f"OpenAI API request failed: HTTP {error.code}: {body}") from error
-        except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+        except (
+            TimeoutError,
+            socket.timeout,
+            urllib.error.URLError,
+            http.client.RemoteDisconnected,
+            ConnectionError,
+        ) as error:
             if attempt < OPENAI_MAX_ATTEMPTS:
                 time.sleep(min(60, 2**attempt))
                 continue
@@ -377,7 +384,13 @@ def chat_completion_retry_json(
             raise RuntimeError(
                 f"{provider_label} API request failed: HTTP {error.code}: {body}"
             ) from error
-        except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+        except (
+            TimeoutError,
+            socket.timeout,
+            urllib.error.URLError,
+            http.client.RemoteDisconnected,
+            ConnectionError,
+        ) as error:
             if attempt < OPENAI_MAX_ATTEMPTS:
                 time.sleep(min(60, 2**attempt))
                 continue
