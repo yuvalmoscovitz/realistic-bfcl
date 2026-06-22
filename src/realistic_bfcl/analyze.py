@@ -6,6 +6,7 @@ import math
 import re
 import statistics
 from collections import defaultdict
+from pathlib import Path
 
 from .common import (
     DIMENSION_FILES,
@@ -988,6 +989,166 @@ def add_multiple_comparison_adjustments(
         row["benjamini_hochberg_q_value"] = min(1.0, running_q)
 
     return rows
+
+
+CONTEXT_DOSE_DIMENSIONS = (
+    "context_dose_small",
+    "context_dose_medium",
+    "context_dose_large",
+)
+
+CONTEXT_DOSE_ORDER = {
+    "context_dose_small": 0,
+    "context_dose_medium": 1,
+    "context_dose_large": 2,
+}
+
+
+def context_dose_summary_paths() -> list[Path]:
+    paths = [
+        *REPO_ROOT.glob("artifacts/results/paired/context_dose_*/*_summary.json"),
+        *REPO_ROOT.glob("artifacts/results/paired/context_dose_*/*/*_summary.json"),
+    ]
+    return sorted(set(paths))
+
+
+def context_dose_run_name(summary_path: Path, dimension: str) -> str:
+    if summary_path.parent.name == dimension:
+        return "default"
+    return summary_path.parent.name
+
+
+def context_dose_summary_rows() -> list[dict[str, object]]:
+    rows = []
+    for summary_path in context_dose_summary_paths():
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        dimension = str(summary["dimension"])
+        if dimension not in CONTEXT_DOSE_DIMENSIONS:
+            continue
+        metrics = summary["metrics"]
+        clean_success_noisy_failure = int(metrics["clean_success_noisy_failure"])
+        clean_failure_noisy_success = int(metrics["clean_failure_noisy_success"])
+        clean_correct = int(metrics["clean_correct"])
+        rows.append(
+            {
+                "model": summary["model"],
+                "provider": summary.get("provider", ""),
+                "tier": summary.get("tier", ""),
+                "temperature": summary.get("temperature", ""),
+                "run": context_dose_run_name(summary_path, dimension),
+                "context_size": dimension[len("context_dose_") :],
+                "dimension": dimension,
+                "total": metrics["total"],
+                "clean_accuracy": metrics["clean_accuracy"],
+                "noisy_accuracy": metrics["noisy_accuracy"],
+                "absolute_degradation": metrics["absolute_degradation"],
+                "clean_success_noisy_failure": clean_success_noisy_failure,
+                "clean_failure_noisy_success": clean_failure_noisy_success,
+                "net_regressions": clean_success_noisy_failure
+                - clean_failure_noisy_success,
+                "clean_success_noisy_failure_rate": (
+                    clean_success_noisy_failure / clean_correct if clean_correct else 0.0
+                ),
+                "mcnemar_exact_p_value": mcnemar_exact_p_value(
+                    clean_success_noisy_failure,
+                    clean_failure_noisy_success,
+                ),
+                "summary_path": summary_path.relative_to(REPO_ROOT).as_posix(),
+            }
+        )
+
+    return sorted(
+        rows,
+        key=lambda row: (
+            str(row["model"]),
+            str(row["run"]),
+            CONTEXT_DOSE_ORDER[str(row["dimension"])],
+        ),
+    )
+
+
+def context_dose_monotonic_note(rows: list[dict[str, object]]) -> list[str]:
+    grouped: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
+    for row in rows:
+        grouped[(str(row["model"]), str(row["run"]))].append(row)
+
+    lines = [
+        "# Context-Length Dose-Response Probe",
+        "",
+        (
+            "This is a small directional probe, separate from the main seven-dimension "
+            "article run. It asks whether clean-success/noisy-failure flips rise as "
+            "irrelevant pasted context gets longer."
+        ),
+        "",
+        "| Model | Run | Small flips | Medium flips | Large flips | Monotonic? |",
+        "|---|---|---:|---:|---:|---|",
+    ]
+    for (model, run), group in sorted(grouped.items()):
+        by_dimension = {str(row["dimension"]): row for row in group}
+        if not all(dimension in by_dimension for dimension in CONTEXT_DOSE_DIMENSIONS):
+            continue
+        counts = [
+            int(by_dimension[dimension]["clean_success_noisy_failure"])
+            for dimension in CONTEXT_DOSE_DIMENSIONS
+        ]
+        monotonic = counts[0] <= counts[1] <= counts[2]
+        lines.append(
+            "| {model} | {run} | {small} | {medium} | {large} | {monotonic} |".format(
+                model=model,
+                run=run,
+                small=counts[0],
+                medium=counts[1],
+                large=counts[2],
+                monotonic="yes" if monotonic else "no",
+            )
+        )
+
+    lines.extend(
+        [
+            "",
+            "Interpretation rule: this file reports raw paired flips only. Treat it as a "
+            "probe for context-length directionality, not as manually reviewed evidence.",
+        ]
+    )
+    return lines
+
+
+def analyze_context_dose_response() -> None:
+    rows = context_dose_summary_rows()
+    if not rows:
+        raise SystemExit("No context-dose paired summaries found. Run run-bfcl first.")
+
+    output_dir = REPO_ROOT / "artifacts/analysis/article"
+    csv_path = output_dir / "context_doseresponse.csv"
+    md_path = output_dir / "context_doseresponse.md"
+    write_csv(
+        csv_path,
+        rows,
+        [
+            "model",
+            "provider",
+            "tier",
+            "temperature",
+            "run",
+            "context_size",
+            "dimension",
+            "total",
+            "clean_accuracy",
+            "noisy_accuracy",
+            "absolute_degradation",
+            "clean_success_noisy_failure",
+            "clean_failure_noisy_success",
+            "net_regressions",
+            "clean_success_noisy_failure_rate",
+            "mcnemar_exact_p_value",
+            "summary_path",
+        ],
+    )
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text("\n".join(context_dose_monotonic_note(rows)) + "\n", encoding="utf-8")
+    print(f"Wrote {csv_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {md_path.relative_to(REPO_ROOT)}")
 
 
 def paired_summary_path(dimension: str, suffix: str) -> object:

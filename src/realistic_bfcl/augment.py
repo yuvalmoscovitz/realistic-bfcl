@@ -335,11 +335,48 @@ PASTED_CONTEXT_BLOCK_TEMPLATES = (
     "{prompt}",
 )
 
+CONTEXT_DOSE_FILLER_PARAGRAPHS = (
+    "look at this pasted mess from earlier. the opening was too long and the "
+    "middle was mostly me thinking out loud. ignore the old wording and do not "
+    "turn this into a polished note. i only kept it here because it was already "
+    "in the clipboard.",
+    "browser leftovers from the wrong tab. related links, menu labels, comment "
+    "buttons, a newsletter box, a search field, and some random page chrome. it "
+    "looked useful for a second but it is not the thing i need answered.",
+    "notes from the thread above. client is annoyed, the draft is too wordy, the "
+    "summary should be short, the old context is not the task, and the previous "
+    "reply kept explaining things nobody asked about.",
+    "copied email footer junk. thanks, sent from mobile, unsubscribe settings, "
+    "privacy notice, attachment reminder, internal footer, and a bunch of blank "
+    "space. none of this is the actual request.",
+    "terminal paste that does not matter. cache warning, retry message, local "
+    "config note, build log, stale output, and a reminder to clean the folder "
+    "later. this came along for the ride by accident.",
+    "chat cleanup notes. ignore the setup, skip the background, do not reuse the "
+    "long version, do not explain the earlier draft, and answer only the real "
+    "request after this clutter.",
+    "page text from a random article view. trending now, most read, editor picks, "
+    "related stories, comments closed, share button, save button, and a sidebar "
+    "that has nothing to do with what i am asking.",
+    "misc clipboard spill. the previous message was rambling, the outline was "
+    "not helpful, the pasted block is mostly noise, and i am leaving it here "
+    "because cleaning the chat would take longer than asking again.",
+)
+
+CONTEXT_DOSE_WORD_BUDGETS = {
+    "small": 160,
+    "medium": 640,
+    "large": 1500,
+}
+
 VERBATIM_WRAPPER_DIMENSIONS = {
     "profane_sandwich",
     "argumentative_sandwich",
     "distractor_sandwich",
     "pasted_context_block",
+    "context_dose_small",
+    "context_dose_medium",
+    "context_dose_large",
 }
 
 TYPO_REPLACEMENTS = (
@@ -451,6 +488,40 @@ def distractor_sandwich_prompt(clean_prompt: str, index: int) -> str:
 def pasted_context_block_prompt(clean_prompt: str, index: int) -> str:
     template = PASTED_CONTEXT_BLOCK_TEMPLATES[index % len(PASTED_CONTEXT_BLOCK_TEMPLATES)]
     return template.format(prompt=clean_prompt)
+
+
+def context_dose_filler(index: int, size: str) -> str:
+    target_words = CONTEXT_DOSE_WORD_BUDGETS[size]
+    paragraphs = []
+    word_count = 0
+    offset = index % len(CONTEXT_DOSE_FILLER_PARAGRAPHS)
+    while word_count < target_words:
+        paragraph = CONTEXT_DOSE_FILLER_PARAGRAPHS[
+            (offset + len(paragraphs)) % len(CONTEXT_DOSE_FILLER_PARAGRAPHS)
+        ]
+        paragraphs.append(paragraph)
+        word_count += len(paragraph.split())
+    return "\n\n".join(paragraphs)
+
+
+def context_dose_prompt(clean_prompt: str, index: int, size: str) -> str:
+    return (
+        f"{context_dose_filler(index, size)}\n\n"
+        "sorry, the actual request is below.\n\n"
+        f"{clean_prompt}"
+    )
+
+
+def context_dose_small_prompt(clean_prompt: str, index: int) -> str:
+    return context_dose_prompt(clean_prompt, index, "small")
+
+
+def context_dose_medium_prompt(clean_prompt: str, index: int) -> str:
+    return context_dose_prompt(clean_prompt, index, "medium")
+
+
+def context_dose_large_prompt(clean_prompt: str, index: int) -> str:
+    return context_dose_prompt(clean_prompt, index, "large")
 
 
 def quoted_literal_spans(text: str) -> list[tuple[int, int]]:
@@ -710,15 +781,21 @@ def validate_augmented_prompt(
     return reasons
 
 
-def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
+def augment_dimension(
+    dimension: str,
+    suffix: str,
+    transform: object,
+    examples: list[dict[str, object]] | None = None,
+) -> None:
     output_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
 
     rows = []
-    examples = selected_augmentation_examples()
-    limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
-    if limit is not None:
-        examples = examples[:limit]
-        print(f"Limiting augmentation to first {len(examples)} examples")
+    if examples is None:
+        examples = selected_augmentation_examples()
+        limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
+        if limit is not None:
+            examples = examples[:limit]
+            print(f"Limiting augmentation to first {len(examples)} examples")
 
     for index, example in enumerate(examples):
         if dimension == "typos":
@@ -827,6 +904,40 @@ def selected_augmentation_examples() -> list[dict[str, object]]:
     return read_jsonl(subset_path)
 
 
+def stratified_limit(
+    examples: list[dict[str, object]],
+    limit: int,
+) -> list[dict[str, object]]:
+    by_category: dict[str, list[dict[str, object]]] = {}
+    for example in examples:
+        by_category.setdefault(str(example["category"]), []).append(example)
+
+    selected = []
+    categories = sorted(by_category)
+    while len(selected) < limit:
+        added = False
+        for category in categories:
+            if not by_category[category]:
+                continue
+            selected.append(by_category[category].pop(0))
+            added = True
+            if len(selected) == limit:
+                break
+        if not added:
+            break
+    return selected
+
+
+def selected_context_dose_examples() -> list[dict[str, object]]:
+    examples = selected_augmentation_examples()
+    limit = optional_positive_int_env("REALISTIC_BFCL_AUGMENT_LIMIT")
+    if limit is None:
+        return examples
+    selected = stratified_limit(examples, limit)
+    print(f"Limiting context-dose augmentation to {len(selected)} stratified examples")
+    return selected
+
+
 def augment_typos() -> None:
     augment_dimension("typos", "typos", typo_prompt)
 
@@ -865,6 +976,29 @@ def augment_distractor_sandwich() -> None:
 
 def augment_pasted_context_block() -> None:
     augment_dimension("pasted_context_block", "pasted_context_block", pasted_context_block_prompt)
+
+
+def augment_context_dose_response() -> None:
+    examples = selected_context_dose_examples()
+    augment_dimension(
+        "context_dose_small",
+        "context_dose_small",
+        context_dose_small_prompt,
+        examples=examples,
+    )
+    augment_dimension(
+        "context_dose_medium",
+        "context_dose_medium",
+        context_dose_medium_prompt,
+        examples=examples,
+    )
+    augment_dimension(
+        "context_dose_large",
+        "context_dose_large",
+        context_dose_large_prompt,
+        examples=examples,
+    )
+    review_context_dose_response()
 
 
 def augment_telegraphic_request() -> None:
@@ -931,6 +1065,56 @@ def review_augmentations() -> None:
         "aug_distractor_sandwich",
         "aug_pasted_context_block",
         "aug_telegraphic_request",
+        "function_names",
+        "ground_truth",
+    ]
+    rows = []
+    for example in examples:
+        row = {
+            "base_id": example["id"],
+            "category": example["category"],
+            "clean_prompt": prompt_text(example),
+            "function_names": ", ".join(function["name"] for function in example["function"]),
+            "ground_truth": json.dumps(example["ground_truth"], ensure_ascii=False),
+        }
+        for dimension, column in dimensions:
+            augmented = generated_by_dimension[dimension][example["id"]]
+            row[column] = prompt_text(augmented)
+        rows.append(row)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Wrote {output_path.relative_to(REPO_ROOT)}")
+
+
+def review_context_dose_response() -> None:
+    output_path = REPO_ROOT / "artifacts/generated/context_dose_response_review.csv"
+    dimensions = (
+        ("context_dose_small", "context_dose_small"),
+        ("context_dose_medium", "context_dose_medium"),
+        ("context_dose_large", "context_dose_large"),
+    )
+    generated_by_dimension = {}
+    for dimension, _column in dimensions:
+        path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
+        if not path.exists():
+            raise SystemExit(
+                f"Missing {path.relative_to(REPO_ROOT)}. Run augment-context-dose first."
+            )
+        generated_by_dimension[dimension] = {row["base_id"]: row for row in read_jsonl(path)}
+
+    examples = selected_context_dose_examples()
+
+    fieldnames = [
+        "base_id",
+        "category",
+        "clean_prompt",
+        "context_dose_small",
+        "context_dose_medium",
+        "context_dose_large",
         "function_names",
         "ground_truth",
     ]

@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 
-from .analyze import analyze
-from .augment import augment
+from .analyze import analyze, analyze_context_dose_response
+from .augment import augment, augment_context_dose_response
 from .evaluate import freeze_bfcl, run_bfcl
 from .llm_augment import augment_llm_pilot
 from .rewrite_subset import build_rewrite_subset
@@ -94,6 +94,24 @@ STAGES: tuple[Stage, ...] = (
         ),
     ),
     Stage(
+        name="augment-context-dose",
+        purpose=(
+            "Generate small/medium/large pasted-context variants for the "
+            "context-length dose-response probe."
+        ),
+        inputs=("artifacts/frozen/clean_subset.jsonl",),
+        outputs=(
+            "artifacts/generated/context_dose_small.jsonl",
+            "artifacts/generated/context_dose_medium.jsonl",
+            "artifacts/generated/context_dose_large.jsonl",
+            "artifacts/generated/context_dose_response_review.csv",
+        ),
+        next_action=(
+            "Run BFCL with REALISTIC_BFCL_DIMENSIONS set to the three context-dose "
+            "dimensions, then run analyze-context-dose."
+        ),
+    ),
+    Stage(
         name="build-rewrite-subset",
         purpose="Build the 500-example rewrite-suitable subset for LLM augmentation.",
         inputs=("artifacts/frozen/clean_subset.jsonl",),
@@ -141,6 +159,21 @@ STAGES: tuple[Stage, ...] = (
             "Use adjusted regression metrics to decide whether the pilot is ready to scale."
         ),
     ),
+    Stage(
+        name="analyze-context-dose",
+        purpose=(
+            "Summarize the context-length dose-response probe across available "
+            "model result directories."
+        ),
+        inputs=("artifacts/results/paired/context_dose_*/",),
+        outputs=(
+            "artifacts/analysis/article/context_doseresponse.csv",
+            "artifacts/analysis/article/context_doseresponse.md",
+        ),
+        next_action=(
+            "Inspect whether clean-success/noisy-failure counts rise with context length."
+        ),
+    ),
 )
 
 
@@ -182,6 +215,9 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
     if stage.name == "augment-llm-pilot":
         augment_llm_pilot()
         return
+    if stage.name == "augment-context-dose":
+        augment_context_dose_response()
+        return
     if stage.name == "build-rewrite-subset":
         build_rewrite_subset()
         return
@@ -190,6 +226,9 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         return
     if stage.name == "analyze":
         analyze()
+        return
+    if stage.name == "analyze-context-dose":
+        analyze_context_dose_response()
         return
     raise SystemExit(f"Stage implementation missing: {stage.name}")
 
