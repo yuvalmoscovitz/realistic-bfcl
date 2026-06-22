@@ -183,6 +183,11 @@ artifacts/analysis/article/haiku_full_pool_paired_stats.csv
 artifacts/analysis/article/haiku_full_pool_paired_stats.json
 ```
 
+The paired stats files were added specifically to avoid overstating weak
+dimensions. They report the two discordant directions separately and use an
+exact McNemar test, so dimensions like `pasted_context_block` are visible as
+near-balanced rather than being folded into one pooled degradation number.
+
 ## What The Failures Look Like
 
 Most failures were not dramatic.
