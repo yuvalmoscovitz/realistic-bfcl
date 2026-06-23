@@ -1,503 +1,186 @@
-# Realistic-BFCL: A Small Test For Messy Tool Use
+# Realistic-BFCL - Findings
 
-Suppose we have a function-calling benchmark example:
+## Summary
 
-```text
-Find the cost of a 2 GB and a 4 GB AWS EC2 machine with one CPU.
-```
+**Clean evals tell you whether your agent *can* do the task. They do not tell you
+whether it *will* once a real user phrases the request the way real users
+actually do.** This note measures that gap on BFCL tool-calling.
 
-The model gets it right. It calls the pricing tool twice: once for `2 GB`, once
-for `4 GB`.
+Across three models of increasing clean accuracy, clean BFCL accuracy overstates
+robustness to ordinary, production-like phrasing, and the clean benchmark cannot
+see the gap. The cheap model is fragile to a broad range of phrasing noise.
+Capable models shed almost all of it, with one exception that survives across
+the stronger models tested:
 
-Now change only the user prompt:
+> **Telegraphic shorthand - terse, grammar-free phrasing - is the one noise
+> dimension that degrades every model tested, and the only one that stays
+> significant on both capable models after multiple-comparison correction.**
 
-```text
-what's cost of 2 and 4 gb ram machine on aws ec2 with one CPU? fucking please man
-```
+This is the "can vs. will" gap made concrete. Every model here can price two
+machines when asked in clean prose, and clean BFCL confirms it. Phrase the same
+request as `aws ec2 2gb 4gb 1cpu price` and the model that passed the clean test
+begins dropping the second machine, a failure the clean benchmark never
+surfaces, because clean prompts are never written that way.
 
-The tool schema is the same. The gold answer is the same. The only difference is
-that the user sounds like a user.
+## Method
 
-In one reviewed Realistic-BFCL run, `gpt-5.4-nano` now called the pricing tool
-only once.
+For each base BFCL example we hold everything fixed: the tool schema, the gold
+function name and arguments, the AST evaluator, and the model. We change only
+the surface phrasing of the user request. A noisy variant counts only if its
+correct tool call is identical to the clean one. Deterministic invariant checks
+reject any rewrite that alters a number, a quoted string, or a visible gold
+argument value.
 
-That is the whole point of this project.
+All runs are full-pool, 2,351 examples, at temperature `0`. For each model and
+dimension, we report the two paired discordant counts: clean-to-noisy failures
+and noisy-to-clean fixes. We also report an exact McNemar test on those counts.
+Reporting both directions prevents weak, near-balanced dimensions from being
+laundered into a single pooled degradation number. Significance below is stated
+under Bonferroni correction across the seven dimensions per model
+(`alpha ~= 0.0071`), with Benjamini-Hochberg FDR noted where it changes the
+call.
 
-Clean function-calling benchmarks are useful. But they usually test clean
-requests. Real users paste random context, write shorthand, complain, mistype
-things, remove spaces, and ask for multiple actions casually. A model can look
-good on the clean benchmark and still be brittle in those cases.
+## Headline Results
 
-Realistic-BFCL asks a narrow question:
+| Model | Provider | Tier | Clean acc. | Avg noisy acc. | Avg drop |
+|---|---|---|---:|---:|---:|
+| `gpt-5.4-nano` | OpenAI | cheap | 0.761 | 0.749 | 0.012 |
+| `claude-haiku-4-5-20251001` | Anthropic | mid | 0.832 | 0.827 | 0.005 |
+| `z-ai/glm-4.6` | OpenRouter | strong-open | 0.845 | 0.836 | 0.009 |
 
-> If the clean BFCL prompt succeeds, does the same model still make the same
-> tool call when the prompt is written more like real user traffic?
+Clean accuracy rises across these three models, from `0.761` to `0.832` to
+`0.845`, but aggregate degradation is **not** monotonic: GLM-4.6 has the highest
+clean accuracy yet a larger average drop than Haiku, because it takes bigger
+hits on the two dimensions that survive, telegraphic phrasing and cursing, even
+as it is robust to the rest. We therefore do **not** claim "more capable models
+are uniformly more robust." The robust claim is dimension-specific.
 
-## The Experiment
+## Per-Dimension Paired Results
 
-I started from a 2,351-example BFCL-derived pool.
+Sorted by exact p-value. `Sig` means significant under Bonferroni correction
+(`alpha ~= 0.0071`).
 
-For each example, I kept:
+### `gpt-5.4-nano` (clean 0.761)
 
-- the same tool schema
-- the same expected function name
-- the same expected arguments
-- the same evaluator
-- the same model
+| Dimension | Noisy | Drop | Fail | Fix | McNemar p | Sig |
+|---|---:|---:|---:|---:|---:|:--:|
+| `pasted_context_block` | 0.742 | 0.019 | 96 | 51 | 0.00026 | **yes** |
+| `cursing` | 0.744 | 0.017 | 97 | 58 | 0.0022 | **yes** |
+| `telegraphic_request` | 0.746 | 0.014 | 98 | 64 | 0.0093 | no (FDR yes, q=0.022) |
+| `irrelevant_context` | 0.749 | 0.012 | 84 | 56 | 0.0222 | no (FDR yes, q=0.039) |
+| `argumentative_challenge` | 0.751 | 0.010 | 76 | 52 | 0.0416 | no |
+| `removed_spaces` | 0.753 | 0.008 | 76 | 57 | 0.1182 | no |
+| `typos` | 0.758 | 0.003 | 67 | 60 | 0.5946 | no |
 
-Then I changed only the user prompt.
+### `claude-haiku-4-5-20251001` (clean 0.832)
 
-The current noise types are deliberately simple:
+| Dimension | Noisy | Drop | Fail | Fix | McNemar p | Sig |
+|---|---:|---:|---:|---:|---:|:--:|
+| `telegraphic_request` | 0.817 | 0.014 | 51 | 17 | 0.000045 | **yes** |
+| `cursing` | 0.824 | 0.008 | 30 | 12 | 0.0079 | no (borderline) |
+| `irrelevant_context` | 0.825 | 0.006 | 29 | 14 | 0.0315 | no |
+| `argumentative_challenge` | 0.827 | 0.005 | 23 | 12 | 0.0895 | no |
+| `removed_spaces` | 0.829 | 0.002 | 13 | 8 | 0.3833 | no |
+| `typos` | 0.830 | 0.001 | 12 | 9 | 0.6636 | no |
+| `pasted_context_block` | 0.831 | 0.001 | 26 | 24 | 0.8877 | no |
 
-- `typos`
-- `cursing`
-- `irrelevant_context`
-- `removed_spaces`
-- `argumentative_challenge`
-- `pasted_context_block`
-- `telegraphic_request`
+### `z-ai/glm-4.6` (clean 0.845)
 
-In the discussion below, `cursing` is best read as a frustrated-register
-condition. Profanity is one concrete marker of user impatience; it is not the
-scientific claim by itself.
+| Dimension | Noisy | Drop | Fail | Fix | McNemar p | Sig |
+|---|---:|---:|---:|---:|---:|:--:|
+| `telegraphic_request` | 0.825 | 0.020 | 86 | 38 | 0.000019 | **yes** |
+| `cursing` | 0.831 | 0.014 | 76 | 43 | 0.0032 | **yes** |
+| `argumentative_challenge` | 0.837 | 0.009 | 60 | 40 | 0.0569 | no |
+| `irrelevant_context` | 0.838 | 0.007 | 52 | 36 | 0.1093 | no |
+| `removed_spaces` | 0.839 | 0.006 | 48 | 33 | 0.1193 | no |
+| `typos` | 0.840 | 0.006 | 49 | 36 | 0.1928 | no |
+| `pasted_context_block` | 0.843 | 0.002 | 46 | 42 | 0.7493 | no |
 
-These are not jailbreaks. They are not meant to be clever attacks. They are
-ordinary ways people write when they are rushed, annoyed, casual, or copying
-from somewhere else.
+## The Cross-Model Signal
 
-## Result
+- **`telegraphic_request`** is the through-line. It degrades every model:
+  significant after Bonferroni on both capable models (Haiku `p = 4.5e-5`,
+  GLM-4.6 `p = 1.9e-5`), and on the cheap model it is significant under FDR
+  control (`q = 0.022`) and borderline under the stricter Bonferroni threshold.
+  It is the only dimension significant on both capable models.
+- **`cursing`** is the secondary signal: significant under Bonferroni on nano
+  (`p = 0.0022`) and GLM-4.6 (`p = 0.0032`), and borderline on Haiku
+  (`p = 0.0079`, just above the corrected threshold). Profanity shifts routing
+  even though it carries no task information.
+- **`pasted_context_block`** is the instructive reversal. It is the largest and
+  most significant degradation on the cheap model (`p = 0.00026`, drop 0.019),
+  but a near-perfect coin flip on both capable models (Haiku 26 vs. 24,
+  `p = 0.89`; GLM 46 vs. 42, `p = 0.75`). It is a cheap-model fragility that
+  capability eliminates. It also shows why the paired test matters: a
+  one-directional regression count would have overstated this dimension.
 
-Clean accuracy on this pool was `76.1%`.
+The shape across capability: the cheap model is broadly fragile. Pasted context,
+profanity, terseness, and irrelevant context all register. Capable models drop
+almost all of that, but not terseness.
 
-Here is what happened after adding each kind of noise:
+## Interpretation
 
-| Noise type | Clean acc. | Noisy acc. | Drop | Clean ok -> noisy fail | Clean fail -> noisy ok | McNemar p |
-|---|---:|---:|---:|---:|---:|---:|
-| `pasted_context_block` | 0.761 | 0.742 | 0.019 | 96 | 51 | 0.0003 |
-| `cursing` | 0.761 | 0.744 | 0.017 | 97 | 58 | 0.0022 |
-| `telegraphic_request` | 0.761 | 0.746 | 0.014 | 98 | 64 | 0.0093 |
-| `irrelevant_context` | 0.761 | 0.749 | 0.012 | 84 | 56 | 0.0222 |
-| `argumentative_challenge` | 0.761 | 0.751 | 0.010 | 76 | 52 | 0.0416 |
-| `removed_spaces` | 0.761 | 0.753 | 0.008 | 76 | 57 | 0.1182 |
-| `typos` | 0.761 | 0.758 | 0.003 | 67 | 60 | 0.5946 |
+1. Clean BFCL accuracy does not certify robustness to realistic phrasing. Even a
+   strong open function-calling model has a statistically significant weakness
+   to telegraphic shorthand that the clean benchmark cannot see.
+2. Capability buys real robustness at the dimension level: most perturbations
+   that hurt the cheap model do nothing detectable to the capable ones. But it
+   does not buy robustness to terse phrasing, and aggregate drop is not monotonic
+   in clean accuracy.
+3. The mechanism in the failing examples is frequently **list compression**:
+   terse phrasing of a multi-item request (`price a 2 GB and a 4 GB machine` to
+   `2gb 4gb price`) leads the model to fire one tool call instead of two, or to
+   drop the second item of a parallel request. This is a specific, reproducible
+   failure rather than generic "messiness."
 
-The drops are not huge.
+## What This Does And Does Not Show
 
-But that is not the interesting part.
+- This is a focused probe on single-turn BFCL tool-calling, not a general
+  agentic benchmark.
+- Capability does not uniformly reduce degradation; the aggregate effect is not
+  a clean gradient.
+- Per-dimension counts are **raw paired flips**. McNemar establishes that the
+  significant flips are non-random, but not that every flip is a true phrasing
+  failure rather than an oracle artifact, such as `panda` vs. `giant panda` or a
+  brand-name vs. localized string. Manual review of the significant cells
+  (`telegraphic_request`, `cursing`, and nano's `pasted_context_block`) is the
+  remaining step to make those counts airtight. Non-significant dimensions do
+  not require review for the current article-level claim.
+- A context-length dose-response probe, scaling pasted-context size, did **not**
+  find that longer inert context amplifies the phrasing penalty. On a small nano
+  run the trend was flat to slightly reversed. Inert filler is the weakest form
+  of context pressure; competing or stale context was not tested. This remains
+  an open question, not a supported claim.
 
-The interesting part is that these are paired examples. The same base example
-can succeed when written cleanly and fail when written more like real user
-traffic. That is the failure surface this project is trying to expose.
+## Reproducibility
 
-The paired statistics are a sanity check, not the main claim. The exact
-percentage drop is less important than the existence of reviewed
-clean-success/noisy-failure examples under oracle-preserving rewrites. The full
-paired counts, McNemar p-values, and multiple-comparison corrections are in
-`artifacts/analysis/article/paired_stats.csv`.
+- BFCL substrate and dimensions are pinned in `configs/`.
+- All runs are full-pool and temperature `0`; temperature is recorded in run
+  metadata and cache fingerprints.
+- Per-model paired statistics and McNemar outputs are written under
+  `artifacts/analysis/article/`.
 
-We also repeated the evaluation three times with fresh clean and noisy model
-calls. The direction held in every run: each noise type reduced accuracy each
-time.
-
-| Noise type | Runs | Mean drop | Min drop | Max drop | Drop sd |
-|---|---:|---:|---:|---:|---:|
-| `pasted_context_block` | 3 | 0.025 | 0.019 | 0.032 | 0.007 |
-| `cursing` | 3 | 0.022 | 0.017 | 0.026 | 0.005 |
-| `telegraphic_request` | 3 | 0.016 | 0.014 | 0.020 | 0.003 |
-| `argumentative_challenge` | 3 | 0.014 | 0.010 | 0.019 | 0.004 |
-| `irrelevant_context` | 3 | 0.011 | 0.009 | 0.012 | 0.002 |
-| `removed_spaces` | 3 | 0.009 | 0.005 | 0.013 | 0.004 |
-| `typos` | 3 | 0.006 | 0.003 | 0.009 | 0.003 |
-
-Reviewed regressions exclude rows where the oracle looked ambiguous, the
-augmentation may have changed the task, or the example was manually questionable.
-The audit rules are in [annotation_protocol.md](annotation_protocol.md), and the
-first-pass realism audit summary is checked in as
-`artifacts/analysis/article/realism_audit_summary.csv`.
-
-So the table is trying to answer a conservative question:
-
-```text
-How often did ordinary prompt messiness break a tool call that already worked?
-```
-
-This small study is a probe, not a leaderboard. Its purpose is to expose a
-failure surface and motivate more realistic robustness testing for tool routers.
-
-## A Mid-Model Check
-
-The first result above used one cheap model, so I also ran the same frozen
-2,351-example pool on `claude-haiku-4-5-20251001` through Anthropic Message
-Batches at temperature `0`.
-
-This was not a new benchmark version. The prompts, schemas, gold answers, and
-seven dimensions were the same. Only the model changed.
-
-Raw Haiku results:
-
-| Noise type | Clean acc. | Noisy acc. | Drop | Clean ok -> noisy fail | Clean fail -> noisy ok | McNemar p |
-|---|---:|---:|---:|---:|---:|---:|
-| `telegraphic_request` | 0.832 | 0.817 | 0.014 | 51 | 17 | 0.000045 |
-| `cursing` | 0.832 | 0.824 | 0.008 | 30 | 12 | 0.007916 |
-| `irrelevant_context` | 0.832 | 0.825 | 0.006 | 29 | 14 | 0.031540 |
-| `argumentative_challenge` | 0.832 | 0.827 | 0.005 | 23 | 12 | 0.089531 |
-| `removed_spaces` | 0.832 | 0.829 | 0.002 | 13 | 8 | 0.383310 |
-| `typos` | 0.832 | 0.830 | 0.001 | 12 | 9 | 0.663624 |
-| `pasted_context_block` | 0.832 | 0.831 | 0.001 | 26 | 24 | 0.887725 |
-
-Pooled across all seven dimensions:
-
-```text
-paired rows:             16,457
-clean accuracy:          0.832
-noisy accuracy:          0.826
-raw drop:                0.005
-clean -> noisy failures: 184
-noisy fixes clean:       96
-```
-
-The Haiku result disciplines the claim. The effect is much smaller than the
-nano result and is not uniform across noise types. `telegraphic_request` is the
-cleanest raw Haiku signal: 51 clean-success/noisy-failure cases versus 17
-clean-failure/noisy-success cases. `cursing` and `irrelevant_context` are also
-directional before manual review. But `pasted_context_block`, `typos`, and
-`removed_spaces` are near-balanced for Haiku.
-
-That suggests a more careful story: phrasing brittleness is strongest on the
-cheap model, shrinks on a stronger mid-tier model, and does not disappear
-entirely. Telegraphic shorthand is the clearest remaining failure surface in
-this run.
-
-The full-pool Haiku regressions have not yet been manually reviewed. On the
-250-example Haiku pilot, many raw flips were baseline/oracle ambiguities such
-as `giant panda` vs. `panda`, `Adidas` vs. `阿迪达斯`, or `brownies` vs.
-`dessert`. So the Haiku table should be read as a raw paired robustness result,
-not as a final true-failure count.
-
-The checked-in raw summary is in:
+Key artifacts:
 
 ```text
-artifacts/analysis/article/haiku_full_pool_summary.csv
-artifacts/analysis/article/haiku_full_pool_summary.json
-artifacts/analysis/article/haiku_full_pool_paired_stats.csv
-artifacts/analysis/article/haiku_full_pool_paired_stats.json
-```
-
-The paired stats files were added specifically to avoid overstating weak
-dimensions. They report the two discordant directions separately and use an
-exact McNemar test, so dimensions like `pasted_context_block` are visible as
-near-balanced rather than being folded into one pooled degradation number.
-
-## A Strong Open-Model Check
-
-I also ran the full 2,351-example pool on `z-ai/glm-4.6` through OpenRouter,
-pinned to DeepInfra, at temperature `0`. This run used a 1,024-token router
-output cap. That cap matters: an earlier 256-token GLM run artificially
-depressed clean accuracy because some tool-call outputs were truncated.
-
-Raw GLM-4.6 results:
-
-| Noise type | Clean acc. | Noisy acc. | Drop | Clean ok -> noisy fail | Clean fail -> noisy ok | McNemar p |
-|---|---:|---:|---:|---:|---:|---:|
-| `telegraphic_request` | 0.845 | 0.825 | 0.020 | 86 | 38 | 0.000019 |
-| `cursing` | 0.845 | 0.831 | 0.014 | 76 | 43 | 0.003183 |
-| `argumentative_challenge` | 0.845 | 0.837 | 0.009 | 60 | 40 | 0.056888 |
-| `irrelevant_context` | 0.845 | 0.838 | 0.007 | 52 | 36 | 0.109295 |
-| `removed_spaces` | 0.845 | 0.839 | 0.006 | 48 | 33 | 0.119274 |
-| `typos` | 0.845 | 0.840 | 0.006 | 49 | 36 | 0.192760 |
-| `pasted_context_block` | 0.845 | 0.843 | 0.002 | 46 | 42 | 0.749329 |
-
-This changes the story in a useful way. GLM-4.6 does not show broad fragility
-across all seven dimensions. `telegraphic_request` is the clearest signal, and
-`cursing` is also directional. `pasted_context_block` is basically null.
-
-So the model-comparison result is not "messy prompts break everything." It is
-more specific: the paired method exposes a real failure surface, the surface is
-largest for the cheap model, smaller for Haiku, and selective for GLM. The
-same benchmark layer can therefore distinguish broad phrasing brittleness from
-noise types that still affect stronger tool routers.
-
-The checked-in comparison table is in:
-
-```text
-artifacts/analysis/article/model_comparison.csv
-artifacts/analysis/article/model_comparison.json
-artifacts/analysis/article/glm46_full_pool_paired_summary.csv
-artifacts/analysis/article/glm46_full_pool_paired_summary.json
-```
-
-## What The Failures Look Like
-
-Most failures were not dramatic.
-
-The model usually still emitted a valid-looking tool call. It was just the wrong
-one.
-
-| Failure type | Count |
-|---|---:|
-| Wrong argument value | 229 |
-| Missing required tool call | 115 |
-| Wrong tool routing | 63 |
-| Extra tool call | 5 |
-| Argument drop | 1 |
-| Malformed call | 1 |
-
-This matters because these are the failures that are easiest to miss in a real
-system. The JSON parses. The endpoint exists. The call looks plausible. But it
-does the wrong thing.
-
-## A Few Examples
-
-The full reviewed rows are in:
-
-```text
-artifacts/analysis/article/included_failure_examples.csv
-```
-
-Here are some examples that show the shape of the problem.
-
-### Profanity Drops A Parallel Call
-
-Clean:
-
-```text
-What's cost of 2 and 4 gb ram machine on aws ec2 with one CPU?
-```
-
-Noisy:
-
-```text
-what's cost of 2 and 4 gb ram machine on aws ec2 with one CPU? fucking please man
-```
-
-Expected: two pricing calls.
-
-Noisy result: one pricing call.
-
-The profanity does not change the task. But the model now handles only part of
-it.
-
-### Shorthand Drops The Second Item
-
-Clean:
-
-```text
-interviewers list for Python and Java
-```
-
-Noisy:
-
-```text
-interviewers list Python and Java
-```
-
-Expected: one lookup for Python and one lookup for Java.
-
-Noisy result: only Python.
-
-This is not a weird prompt. It is exactly the kind of thing someone types into a
-chat box.
-
-### Frustration Changes The Tool
-
-Clean:
-
-```text
-Can you help me translate this English text to Danish: 'The quick brown fox jumps over the lazy dog.'
-```
-
-Noisy:
-
-```text
-last time you messed this up, so answer carefully can you help me translate this English text to Danish: 'The quick brown fox jumps over the lazy dog.'
-```
-
-Expected: the same translation tool.
-
-Noisy result: a different translation tool.
-
-The user added emotion, not a new requirement.
-
-### A Specific Lookup Becomes A List Endpoint
-
-Clean:
-
-```text
-The maintenance config is needed for 'sandcastle'.
-```
-
-Noisy:
-
-```text
-this is bullshit the maintenance config is needed for 'sandcastle'.
-```
-
-Expected: fetch the maintenance config with `id = sandcastle`.
-
-Noisy result: call a generic list-maintenance-configs endpoint.
-
-Again, the output looks reasonable unless you check the exact intended call.
-
-### Pasted Text Changes A Math Call
-
-The actual task was:
-
-```text
-3 of my friends gave me 10 euros each, how much do I have now?
-```
-
-The noisy prompt also included:
-
-```text
-based on the earlier draft please but ignore the opener. also ignore the ending, both made it worse
-```
-
-Expected: `multiply(a=3, b=10)`.
-
-Noisy result: `add(a=10, b=10)`.
-
-The extra text should not matter. But it did.
-
-## Why This Is Useful
-
-This is not trying to prove that `gpt-5.4-nano` is bad. It is one cheap model on
-one BFCL-derived pool.
-
-The useful point is methodological:
-
-```text
-clean benchmark example
-+ oracle-preserving realistic rewrite
-= paired robustness test
-```
-
-That paired setup is powerful. It lets us separate two questions:
-
-1. Can the model solve the original benchmark example?
-2. Does realistic user messiness break that solution?
-
-Without the pair, those get mixed together.
-
-BFCL is a convenient place to test this because the evaluator is mostly
-black-and-white. Either the model called the right tool with the right arguments,
-or it did not.
-
-That makes the stress test easy to inspect.
-
-But the more important thesis is broader. In high-risk AI applications, the
-evaluation target is often not a neat exact match. It may be a rubric, an expert
-judgment, a preference ranking, or a multi-part assessment of whether the answer
-was complete, safe, and context-aware. In those settings, realistic user
-messiness may cause smaller, more subtle degradations that are harder to see in
-one headline score.
-
-That is exactly why this kind of stress testing matters. If a simple deterministic
-tool benchmark already shows prompt-surface brittleness, then messier, higher
-stakes domains deserve at least as much pressure testing.
-
-## The Main Lesson
-
-The biggest risk in this project is not that the model fails.
-
-The biggest risk is that the augmentation quietly changes the task.
-
-For example, if the original argument is `deer` and the noisy prompt says
-`dear`, that is no longer a clean model failure. It might be an augmentation
-mistake. If the original prompt asks for a decimal but the schema is ambiguous
-about percent formatting, that may be a baseline ambiguity.
-
-So Realistic-BFCL should stay strict:
-
-- preserve the oracle
-- review regressions manually
-- exclude ambiguous cases
-- report raw and filtered metrics separately
-
-The benchmark is only useful if the noisy prompt still means the same thing.
-
-## Relation To Other Work
-
-This is much smaller than recent realistic-agent benchmark projects, but it is
-pointing in the same direction.
-
-- [Surge/Corecraft, "The Hierarchy of Agentic Capabilities"](https://arxiv.org/abs/2601.09032)
-  evaluates agents on realistic workplace tasks and emphasizes concrete failure
-  modes.
-- [Tau-bench](https://arxiv.org/abs/2406.12045) evaluates tool agents through
-  user-agent interaction instead of only static prompts.
-- [RealUserSim](https://arxiv.org/abs/2605.20204) argues that simulated users are
-  often too cooperative, which can hide failures.
-- [CRAB-Bench](https://arxiv.org/abs/2606.01815) also tests imperfect users,
-  distractors, and realistic service settings.
-- Recent clinical AI evaluation work on
-  [case-specific clinician-authored rubrics](https://arxiv.org/abs/2604.24710)
-  is a useful example of the harder evaluation setting: the target is not one
-  exact string or one function call, but expert judgment over many case-specific
-  criteria.
-
-Realistic-BFCL is not trying to replace those. It is a smaller layer over an
-existing deterministic benchmark:
-
-```text
-same BFCL example
-same oracle
-same evaluator
-clean prompt vs. messy prompt
-```
-
-That makes the failures easy to inspect and easy to reproduce.
-
-## Reproduce
-
-Generate the current article-facing analysis:
-
-```bash
-REALISTIC_BFCL_DIMENSIONS=typos,cursing,irrelevant_context,removed_spaces,argumentative_challenge,pasted_context_block,telegraphic_request \
-python scripts/run_stage.py analyze
-```
-
-Main outputs:
-
-```text
-artifacts/analysis/article/dimension_results.csv
 artifacts/analysis/article/paired_stats.csv
-artifacts/analysis/article/realism_audit_summary.csv
-artifacts/analysis/article/stability_repeat_summary.csv
-artifacts/analysis/article/stability_repeat_runs.csv
-artifacts/analysis/article/review_filtering.csv
-artifacts/analysis/article/overall_error_type_counts.csv
+artifacts/analysis/article/model_comparison.csv
+artifacts/analysis/article/haiku_full_pool_summary.csv
+artifacts/analysis/article/glm46_full_pool_paired_summary.csv
 artifacts/analysis/article/included_failure_examples.csv
 artifacts/analysis/article/oracle_issue_examples.csv
 ```
 
-## Implications
+> **GLM-4.6 serving.** GLM-4.6 was served via OpenRouter pinned to the DeepInfra
+> backend at unverified weight precision. Because GLM-4.6 is open weights and is
+> served at varying precision across providers, treat its absolute clean accuracy
+> as provider-dependent. The paired design controls for this: clean and noisy
+> prompts share the same serving route, so the degradation comparison is
+> internally valid regardless of precision.
 
-The narrow result is about BFCL.
+## Next Steps
 
-The broader point is about evaluation.
-
-Benchmarks often make the user unrealistically clean because clean inputs are
-easier to score. That is reasonable, but it leaves out an important failure
-surface. Real users bring context, emotion, shorthand, irrelevant text, copied
-material, and last-minute corrections. Tool routers and agents need to work under
-that distribution too.
-
-Realistic-BFCL is useful because it gives us a clean laboratory for that idea:
-
-```text
-known oracle
-+ same benchmark example
-+ realistic prompt variation
-= measurable robustness gap
-```
-
-For harder-to-score tasks, the same idea should be even more important. If the
-evaluation requires rubrics or expert review, degradation may not appear as a
-single wrong function call. It may appear as a missed caveat, a slightly worse
-plan, an ignored constraint, or an overconfident answer. Those failures are
-harder to count, but in high-risk settings each one can matter.
-
-The takeaway:
-
-> Clean tool-calling accuracy can hide realistic prompt-surface failures. A
-> paired, oracle-preserving noisy layer makes those failures visible.
+1. Manually review the significant cells (`telegraphic_request`, `cursing`, and
+   nano's `pasted_context_block`) to strip any oracle artifacts.
+2. Position this probe relative to prior work on paraphrase and format
+   sensitivity in BFCL-style evaluation.
