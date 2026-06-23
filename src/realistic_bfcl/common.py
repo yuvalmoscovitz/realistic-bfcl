@@ -17,6 +17,7 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MESSAGE_BATCHES_URL = "https://api.anthropic.com/v1/messages/batches"
 XAI_CHAT_COMPLETIONS_URL = "https://api.x.ai/v1/chat/completions"
+OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_OPENAI_CONCURRENCY = 8
 OPENAI_MAX_ATTEMPTS = 8
 ROUTER_SYSTEM_INSTRUCTION = (
@@ -24,7 +25,18 @@ ROUTER_SYSTEM_INSTRUCTION = (
     "Do not answer in prose when a tool call is appropriate."
 )
 ROUTER_TOOL_CHOICE = "required"
-ROUTER_MAX_OUTPUT_TOKENS = 256
+DEFAULT_ROUTER_MAX_OUTPUT_TOKENS = 256
+try:
+    ROUTER_MAX_OUTPUT_TOKENS = int(
+        os.environ.get(
+            "REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS",
+            str(DEFAULT_ROUTER_MAX_OUTPUT_TOKENS),
+        )
+    )
+except ValueError as error:
+    raise SystemExit("REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS must be an integer.") from error
+if ROUTER_MAX_OUTPUT_TOKENS < 1:
+    raise SystemExit("REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS must be >= 1.")
 ROUTER_MESSAGE_SERIALIZATION = "preserve_bfcl_turns_v1"
 RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
 BFCL_CATEGORY_FILES = {
@@ -377,6 +389,33 @@ def xai_api_key() -> str:
     raise SystemExit(
         "Missing XAI_API_KEY or GROK_API_KEY. Set it in the environment or "
         "REALISTIC_BFCL_ENV_FILE."
+    )
+
+
+def openrouter_api_key() -> str:
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return os.environ["OPENROUTER_API_KEY"]
+    if os.environ.get("OPEN_ROUTER_API_KEY"):
+        return os.environ["OPEN_ROUTER_API_KEY"]
+
+    candidates = [
+        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
+        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
+        else None,
+        REPO_ROOT / ".env",
+        REPO_ROOT.parent / "underlayer/.env",
+    ]
+    for path in candidates:
+        if path is None:
+            continue
+        values = read_env_file(path)
+        key = values.get("OPENROUTER_API_KEY") or values.get("OPEN_ROUTER_API_KEY")
+        if key:
+            return key
+
+    raise SystemExit(
+        "Missing OPENROUTER_API_KEY or OPEN_ROUTER_API_KEY. Set it in the environment "
+        "or REALISTIC_BFCL_ENV_FILE."
     )
 
 

@@ -188,6 +188,44 @@ dimensions. They report the two discordant directions separately and use an
 exact McNemar test, so dimensions like `pasted_context_block` are visible as
 near-balanced rather than being folded into one pooled degradation number.
 
+## A Strong Open-Model Check
+
+I also ran the full 2,351-example pool on `z-ai/glm-4.6` through OpenRouter,
+pinned to DeepInfra, at temperature `0`. This run used a 1,024-token router
+output cap. That cap matters: an earlier 256-token GLM run artificially
+depressed clean accuracy because some tool-call outputs were truncated.
+
+Raw GLM-4.6 results:
+
+| Noise type | Clean acc. | Noisy acc. | Drop | Clean ok -> noisy fail | Clean fail -> noisy ok | McNemar p |
+|---|---:|---:|---:|---:|---:|---:|
+| `telegraphic_request` | 0.845 | 0.825 | 0.020 | 86 | 38 | 0.000019 |
+| `cursing` | 0.845 | 0.831 | 0.014 | 76 | 43 | 0.003183 |
+| `argumentative_challenge` | 0.845 | 0.837 | 0.009 | 60 | 40 | 0.056888 |
+| `irrelevant_context` | 0.845 | 0.838 | 0.007 | 52 | 36 | 0.109295 |
+| `removed_spaces` | 0.845 | 0.839 | 0.006 | 48 | 33 | 0.119274 |
+| `typos` | 0.845 | 0.840 | 0.006 | 49 | 36 | 0.192760 |
+| `pasted_context_block` | 0.845 | 0.843 | 0.002 | 46 | 42 | 0.749329 |
+
+This changes the story in a useful way. GLM-4.6 does not show broad fragility
+across all seven dimensions. `telegraphic_request` is the clearest signal, and
+`cursing` is also directional. `pasted_context_block` is basically null.
+
+So the model-comparison result is not "messy prompts break everything." It is
+more specific: the paired method exposes a real failure surface, the surface is
+largest for the cheap model, smaller for Haiku, and selective for GLM. The
+same benchmark layer can therefore distinguish broad phrasing brittleness from
+noise types that still affect stronger tool routers.
+
+The checked-in comparison table is in:
+
+```text
+artifacts/analysis/article/model_comparison.csv
+artifacts/analysis/article/model_comparison.json
+artifacts/analysis/article/glm46_full_pool_paired_summary.csv
+artifacts/analysis/article/glm46_full_pool_paired_summary.json
+```
+
 ## What The Failures Look Like
 
 Most failures were not dramatic.

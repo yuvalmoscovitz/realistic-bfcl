@@ -1,0 +1,4 @@
+dimension,status,total,clean_accuracy,noisy_accuracy,absolute_degradation,clean_success_noisy_failure,clean_failure_noisy_success,net_regressions,mcnemar_exact_p_value
+typos,complete,250,0.868,0.864,0.0040000000000000036,7,6,1,1.0
+cursing,complete,250,0.868,0.852,0.016000000000000014,10,6,4,0.454498291015625
+irrelevant_context,partial_interrupted,56,0.9107142857142857,0.9285714285714286,-0.017857142857142905,1,2,-1,1.0

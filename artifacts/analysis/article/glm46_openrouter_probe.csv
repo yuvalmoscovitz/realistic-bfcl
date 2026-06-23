@@ -1,0 +1,8 @@
+model,provider,provider_route,temperature,eval_limit,dimension,clean_accuracy,noisy_accuracy,absolute_degradation,clean_success_noisy_failure,clean_failure_noisy_success,net_regressions,mcnemar_exact_p_value
+z-ai/glm-4.6,openrouter,OpenRouter pinned to DeepInfra,0.0,250,typos,0.676,0.688,-0.0119999999999999,12,15,-3,0.7011080384254456
+z-ai/glm-4.6,openrouter,OpenRouter pinned to DeepInfra,0.0,250,cursing,0.676,0.712,-0.03599999999999992,12,21,-9,0.16275565745308995
+z-ai/glm-4.6,openrouter,OpenRouter pinned to DeepInfra,0.0,250,irrelevant_context,0.676,0.68,-0.0040000000000000036,16,17,-1,1.0
+z-ai/glm-4.6,openrouter,OpenRouter pinned to DeepInfra,0.0,250,removed_spaces,0.676,0.692,-0.015999999999999903,10,14,-4,0.5412561893463135
+z-ai/glm-4.6,openrouter,OpenRouter pinned to DeepInfra,0.0,250,argumentative_challenge,0.676,0.664,0.01200000000000001,18,15,3,0.7283324808813632
+z-ai/glm-4.6,openrouter,OpenRouter pinned to DeepInfra,0.0,250,pasted_context_block,0.676,0.708,-0.03199999999999992,12,20,-8,0.21532714972272515
+z-ai/glm-4.6,openrouter,OpenRouter pinned to DeepInfra,0.0,250,telegraphic_request,0.676,0.688,-0.0119999999999999,14,17,-3,0.720100131817162

@@ -6,6 +6,8 @@ analysis/*
 !analysis/article/
 !analysis/article/*.csv
 !analysis/article/*.json
+!analysis/article/*diagnostics.md
+!analysis/article/*partial_paired.md
 !analysis/article/README.md
 !frozen/
 frozen/*

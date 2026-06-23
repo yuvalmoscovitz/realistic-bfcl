@@ -1,0 +1,5 @@
+run,correct,total,accuracy,empty_predictions,completion_cap_reference,responses_at_or_above_cap_reference,wrong_responses_at_or_above_cap_reference
+glm_4_6_openrouter_deepinfra_cap256,169,250,0.676,35,250,68,61
+glm_4_6_openrouter_deepinfra_cap1024,217,250,0.868,1,1000,0,0
+gpt_5_4_nano_same250,191,250,0.764,0,250,,
+claude_haiku_4_5_same250,221,250,0.884,0,250,,
