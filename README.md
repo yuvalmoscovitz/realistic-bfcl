@@ -83,6 +83,10 @@ both capable models. Profanity, captured by `cursing`, is a secondary signal.
 significant degradation on the cheap model, but a coin flip on both capable
 models.
 
+A first-pass artifact screen reduces the raw significant-cell counts but does
+not erase the signal: the remaining failures are mostly plausible-looking wrong
+tool calls, dropped calls, or wrong arguments, not malformed outputs.
+
 That is the can-vs.-will gap made concrete. Every model here *can* price two
 machines when asked in clean prose, and the clean benchmark confirms it. But the
 moment the request arrives as `aws ec2 2gb 4gb 1cpu price`, the model that

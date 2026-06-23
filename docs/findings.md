@@ -118,6 +118,34 @@ The shape across capability: the cheap model is broadly fragile. Pasted context,
 profanity, terseness, and irrelevant context all register. Capable models drop
 almost all of that, but not terseness.
 
+## Artifact Screen
+
+Raw clean-to-noisy failures include real model failures and evaluator/oracle
+edge cases. We therefore keep two views: the raw paired McNemar counts above,
+and a screened count that removes likely artifacts such as accepted-alias gaps
+(`panda` vs. `giant panda`) or baseline ambiguity (`8%` represented as `8`
+instead of `0.08`).
+
+| Model | Dimension | Raw failures | Possible artifacts | Screened likely failures |
+|---|---|---:|---:|---:|
+| `gpt-5.4-nano` | `telegraphic_request` | 98 | 23 | 75 |
+| `gpt-5.4-nano` | `pasted_context_block` | 96 | 22 | 74 |
+| `gpt-5.4-nano` | `cursing` | 97 | 29 | 67 |
+| `claude-haiku-4-5-20251001` | `telegraphic_request` | 51 | 14 | 37 |
+| `claude-haiku-4-5-20251001` | `cursing` | 30 | 10 | 20 |
+| `z-ai/glm-4.6` | `telegraphic_request` | 86 | 25 | 61 |
+| `z-ai/glm-4.6` | `cursing` | 76 | 26 | 50 |
+
+The nano rows use the existing reviewed article artifact. The Haiku and GLM
+rows use a first-pass significant-cell screen, not a blinded adjudication study.
+That distinction matters: the screened counts should be read as conservative
+article-level evidence, not as final benchmark labels.
+
+The remaining failures are not mostly crashes. They are plausible-looking wrong
+tool calls: missing the second item in a multi-call request, changing a required
+argument, or routing to a related but wrong function. Concrete examples are in
+`artifacts/analysis/article/cross_model_failure_examples.csv`.
+
 ## Interpretation
 
 1. Clean BFCL accuracy does not certify robustness to realistic phrasing. Even a
@@ -139,13 +167,13 @@ almost all of that, but not terseness.
   agentic benchmark.
 - Capability does not uniformly reduce degradation; the aggregate effect is not
   a clean gradient.
-- Per-dimension counts are **raw paired flips**. McNemar establishes that the
-  significant flips are non-random, but not that every flip is a true phrasing
-  failure rather than an oracle artifact, such as `panda` vs. `giant panda` or a
-  brand-name vs. localized string. Manual review of the significant cells
-  (`telegraphic_request`, `cursing`, and nano's `pasted_context_block`) is the
-  remaining step to make those counts airtight. Non-significant dimensions do
-  not require review for the current article-level claim.
+- Per-dimension McNemar counts are still reported raw because they are the
+  correct paired statistical test. The artifact screen above is a separate
+  credibility check on the significant cells. It reduces the counts, but it does
+  not erase the telegraphic or cursing signal.
+- The significant-cell screen is a first-pass review, not a full independent
+  annotation study. Some borderline cases remain, especially where the BFCL gold
+  oracle is stricter than a human might be.
 - A context-length dose-response probe, scaling pasted-context size, did **not**
   find that longer inert context amplifies the phrasing penalty. On a small nano
   run the trend was flat to slightly reversed. Inert filler is the weakest form
@@ -165,6 +193,9 @@ Key artifacts:
 ```text
 artifacts/analysis/article/paired_stats.csv
 artifacts/analysis/article/model_comparison.csv
+artifacts/analysis/article/significant_cell_review_summary.csv
+artifacts/analysis/article/significant_cell_review.csv
+artifacts/analysis/article/cross_model_failure_examples.csv
 artifacts/analysis/article/haiku_full_pool_summary.csv
 artifacts/analysis/article/glm46_full_pool_paired_summary.csv
 artifacts/analysis/article/included_failure_examples.csv
@@ -184,7 +215,7 @@ artifacts/analysis/article/oracle_issue_examples.csv
 
 ## Next Steps
 
-1. Manually review the significant cells (`telegraphic_request`, `cursing`, and
-   nano's `pasted_context_block`) to strip any oracle artifacts.
+1. If this grows from article to benchmark paper, repeat the significant-cell
+   screen with independent adjudication.
 2. Position this probe relative to prior work on paraphrase and format
    sensitivity in BFCL-style evaluation.

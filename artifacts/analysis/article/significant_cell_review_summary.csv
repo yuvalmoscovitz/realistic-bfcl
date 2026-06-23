@@ -1,0 +1,8 @@
+model,dimension,raw_clean_to_noisy_failures,possible_artifact_count,screened_likely_failures,source,notes
+gpt-5.4-nano,telegraphic_request,98,23,75,reviewed_article_artifact,"Existing nano article review excludes possible oracle, augmentation, baseline, and manually excluded questionable rows."
+gpt-5.4-nano,pasted_context_block,96,22,74,reviewed_article_artifact,"Existing nano article review excludes possible oracle, augmentation, baseline, and manually excluded questionable rows."
+gpt-5.4-nano,cursing,97,29,67,reviewed_article_artifact,"Existing nano article review excludes possible oracle, augmentation, baseline, and manually excluded questionable rows."
+claude-haiku-4-5-20251001,telegraphic_request,51,14,37,first_pass_significant_cell_screen,First-pass artifact screen; flags likely true failures separately from possible oracle/baseline strictness artifacts.
+claude-haiku-4-5-20251001,cursing,30,10,20,first_pass_significant_cell_screen,First-pass artifact screen; flags likely true failures separately from possible oracle/baseline strictness artifacts.
+z-ai/glm-4.6,telegraphic_request,86,25,61,first_pass_significant_cell_screen,First-pass artifact screen; flags likely true failures separately from possible oracle/baseline strictness artifacts.
+z-ai/glm-4.6,cursing,76,26,50,first_pass_significant_cell_screen,First-pass artifact screen; flags likely true failures separately from possible oracle/baseline strictness artifacts.
