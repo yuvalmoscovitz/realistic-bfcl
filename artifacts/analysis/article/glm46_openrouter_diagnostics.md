@@ -41,3 +41,19 @@ The seven article-facing noisy dimensions were rerun on the same 250-example poo
 | telegraphic_request | 0.868 | 0.856 | 0.012 | 9 | 6 | 0.607 |
 
 This cap-corrected GLM probe does not show a statistically meaningful degradation on any single dimension. The result should be reported as a robustness/control finding, not as evidence that all capable models fail under these perturbations.
+
+## Full-Pool Cap-1024 Paired Result
+
+The same cap-corrected GLM setup was then run on the full 2,351-example frozen pool. The run used OpenRouter pinned to DeepInfra, temperature 0, and `REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS=1024`.
+
+| dimension | clean acc | noisy acc | drop | clean-to-noisy failures | noisy-to-clean fixes | net regressions | McNemar exact p |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| typos | 0.845 | 0.840 | 0.006 | 49 | 36 | 13 | 0.193 |
+| cursing | 0.845 | 0.831 | 0.014 | 76 | 43 | 33 | 0.003 |
+| irrelevant_context | 0.845 | 0.838 | 0.007 | 52 | 36 | 16 | 0.109 |
+| removed_spaces | 0.845 | 0.839 | 0.006 | 48 | 33 | 15 | 0.119 |
+| argumentative_challenge | 0.845 | 0.837 | 0.009 | 60 | 40 | 20 | 0.057 |
+| pasted_context_block | 0.845 | 0.843 | 0.002 | 46 | 42 | 4 | 0.749 |
+| telegraphic_request | 0.845 | 0.825 | 0.020 | 86 | 38 | 48 | 0.000019 |
+
+On the full pool, GLM-4.6 still does not show broad fragility across all seven dimensions. The clearest signal is `telegraphic_request`, and `cursing` is also statistically directional. `pasted_context_block` remains essentially null. This supports a narrower interpretation: stronger tool-calling models can absorb much of this deterministic messiness, but terse user shorthand still exposes a paired clean-success/noisy-failure surface.

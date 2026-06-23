@@ -55,3 +55,7 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 - `haiku_full_pool_summary.json`: JSON form of the raw full-pool Haiku metrics.
 - `haiku_full_pool_paired_stats.csv`: Haiku clean->noisy vs noisy->clean counts and exact McNemar p-values.
 - `haiku_full_pool_paired_stats.json`: JSON form of the Haiku paired stats.
+- `glm46_full_pool_paired_summary.csv`: full-pool GLM-4.6 paired metrics, OpenRouter pinned to DeepInfra with 1024 output tokens.
+- `glm46_full_pool_paired_summary.json`: JSON form of the full-pool GLM-4.6 paired metrics.
+- `model_comparison.csv`: full-pool per-model/per-dimension comparison for nano, Haiku, and GLM-4.6.
+- `model_comparison.json`: JSON form of the model comparison table.
