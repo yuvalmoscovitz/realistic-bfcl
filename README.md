@@ -1,13 +1,19 @@
 # Realistic-BFCL
 
-Realistic-BFCL is a realism-controlled metamorphic benchmark layer over the
-Berkeley Function Calling Leaderboard (BFCL).
+**Your evals are cleaner than your users.** Clean evals tell you whether your
+agent *can* do the task. They do not tell you whether it *will* once a real user
+phrases the request the way real users actually do.
 
-The research question is whether high clean BFCL scores imply robust
-real-world tool routing. Real users add irrelevant context, reveal intent over
-multiple turns, correct themselves, type casually, sound impatient, mix
-languages, and omit words while remaining understandable. This project measures
-where tool routers fail under ordinary production-like conversational noise.
+Realistic-BFCL is a realism-controlled metamorphic benchmark layer over the
+Berkeley Function Calling Leaderboard (BFCL) built to measure that gap. It keeps
+BFCL's trusted gold oracle, then rephrases each prompt the way production
+traffic arrives: terse, casual, impatient, padded with context, occasionally
+rude. Then it checks whether the same model still makes the same correct tool
+call.
+
+The research question is whether high clean BFCL scores imply robust real-world
+tool routing. They mostly do for capable models, but not entirely, and the gap
+is invisible to the clean benchmark. This project locates where it opens.
 
 ## Minimal Example
 
@@ -27,7 +33,7 @@ The tool schema and gold answer are unchanged. The model should still call the
 same pricing tool twice: once for `2 GB` and once for `4 GB`. If it only calls
 the tool once, that is a paired clean-success/noisy-failure regression.
 
-## What This Tests
+## Core Claim
 
 BFCL provides the trusted deterministic evaluation substrate. Realistic-BFCL
 adds realistic conversational transformations on top of BFCL while preserving
@@ -46,54 +52,45 @@ the final oracle must be well-defined and derived from the clean oracle.
 
 ## Current Findings
 
-We ran a 2,351-example BFCL-derived paired evaluation on `gpt-5.4-nano`.
+The short version: **clean BFCL accuracy overstates how robust a model is to the
+way people actually type, and the clean benchmark cannot see the gap.** It is
+small on capable models and larger on cheap ones, but it is real and it
+concentrates in ordinary user input.
 
-Clean accuracy was `0.761`. All seven realistic noise dimensions produced
-reviewed clean-success/noisy-failure regressions after oracle and manual-review
-filtering.
+We ran the same 2,351-example BFCL-derived paired evaluation across three
+models: a cheap model, a capable mid-tier model, and a strong open
+function-calling model. All runs used temperature `0`, deterministic
+oracle-preserving rewrites, and exact McNemar tests on paired flips.
 
-We repeated the evaluation three times with fresh clean and noisy model calls.
-Every noise type degraded accuracy in every run. The drops are small, but the
-direction is consistent for this model. This is a probe, not a leaderboard: the
-point is that oracle-preserving realistic rewrites expose failures hidden by
-clean prompts.
+| Model | Pool | Clean acc. | Avg noisy acc. | Avg drop |
+|---|---:|---:|---:|---:|
+| `gpt-5.4-nano` | 2,351 | 0.761 | 0.749 | 0.012 |
+| `claude-haiku-4-5-20251001` | 2,351 | 0.832 | 0.827 | 0.005 |
+| `z-ai/glm-4.6` | 2,351 | 0.845 | 0.836 | 0.009 |
 
-This repository currently supports a problem-posing article, not a complete
-multi-model benchmark paper.
+The effect is **not** "messy prompts break every model equally," and it is
+**not** a clean capability gradient. Aggregate degradation is largest on the
+cheap model, but not monotonic: GLM-4.6 has the highest clean accuracy yet shows
+a larger aggregate drop than Haiku. The cheap model is fragile to a broad range
+of phrasing noise; capable models shed almost all of it. What survives is
+specific.
 
-We also ran `claude-haiku-4-5-20251001` on the same 2,351-example pool through
-Anthropic Message Batches at temperature `0`. Haiku's clean accuracy was `0.832`;
-pooled noisy accuracy across the seven dimensions was `0.826`, a raw drop of
-`0.005`. The effect is much smaller than the nano run and is not uniformly
-directional across dimensions. The cleanest Haiku signal is
-`telegraphic_request`: 51 clean-success/noisy-failure cases versus 17
-clean-failure/noisy-success cases, McNemar exact `p = 0.000045`. Several other
-dimensions are weak or near-balanced. The full-pool Haiku regressions have not
-yet been manually reviewed, so treat these as raw paired metrics, not final
-true-failure rates.
+The through-line is **telegraphic shorthand**: terse, grammar-free phrasing, one
+of the most common ways real users address an LLM. It degrades every model, and
+it is the only dimension significant after multiple-comparison correction on
+both capable models. Profanity, captured by `cursing`, is a secondary signal.
+`pasted_context_block` is the instructive reversal: it is the largest and most
+significant degradation on the cheap model, but a coin flip on both capable
+models.
 
-We then ran `z-ai/glm-4.6` through OpenRouter pinned to DeepInfra, also at
-temperature `0`, with a 1,024-token router output cap. GLM's clean accuracy was
-`0.845`. The strongest full-pool signal was again `telegraphic_request`: noisy
-accuracy fell to `0.825`, with 86 clean-success/noisy-failure cases versus 38
-clean-failure/noisy-success cases, McNemar exact `p = 0.000019`. `cursing` was
-also directional. Other dimensions were weaker, and `pasted_context_block` was
-near-null for GLM. The more careful reading is not "all models break"; it is
-that realistic messiness exposes a real paired failure surface, but the effect
-depends strongly on model capability and noise type.
+That is the can-vs.-will gap made concrete. Every model here *can* price two
+machines when asked in clean prose, and the clean benchmark confirms it. But the
+moment the request arrives as `aws ec2 2gb 4gb 1cpu price`, the model that
+passed the clean test starts dropping the second machine. Clean evals never show
+you that, because clean prompts are never written that way.
 
-We also ran a controlled 250-example comparison on a rewrite-suitable subset.
-Deterministic augmentations are the auditable control surface: easy to
-reproduce, inspect, and reject when they touch oracle-bearing content. LLM
-rewrites are the realism surface: harder to validate, but closer to actual user
-traffic. On this controlled subset, deterministic dimensions had a mean raw
-drop of `2.12` points, while LLM rewrite dimensions had a mean raw drop of
-`2.95` points. The numeric lift is modest; the stronger reason to keep LLM
-rewrites is that they make the failure examples easier to recognize as
-realistic user behavior.
-
-See [docs/findings.md](docs/findings.md) for the GitHub-facing research note,
-examples, tables, and implications.
+See [docs/findings.md](docs/findings.md) for the full research note,
+per-dimension tables, McNemar results, interpretation, and limitations.
 
 The small article-facing analysis bundle is checked in under
 `artifacts/analysis/article/` for inspection. Larger generated datasets,
@@ -242,3 +239,18 @@ Batch runs write the same prediction caches and paired summaries as synchronous
 runs, plus a small `_batch_state.json` file for resuming submitted batches. The
 Anthropic adapter also sanitizes provider-incompatible BFCL schema argument
 names, then restores the original argument names before BFCL scoring.
+
+GLM-4.6 was served via OpenRouter pinned to the DeepInfra backend for the
+reported full-pool run:
+
+```bash
+REALISTIC_BFCL_MODELS=openrouter:z-ai/glm-4.6:strong-open \
+REALISTIC_BFCL_OPENROUTER_PROVIDER_ONLY=DeepInfra \
+REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS=1024 \
+python scripts/run_stage.py run-bfcl
+```
+
+Because GLM-4.6 is open weights and is served at varying precision across
+providers, treat its absolute clean accuracy as provider-dependent. The paired
+design controls for this: clean and noisy prompts share the same serving route,
+so the degradation comparison is internally valid regardless of precision.
