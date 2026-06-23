@@ -89,16 +89,6 @@ moment the request arrives as `aws ec2 2gb 4gb 1cpu price`, the model that
 passed the clean test starts dropping the second machine. Clean evals never show
 you that, because clean prompts are never written that way.
 
-We also ran a controlled 250-example comparison on a rewrite-suitable subset.
-Deterministic augmentations are the auditable control surface: easy to
-reproduce, inspect, and reject when they touch oracle-bearing content. LLM
-rewrites are the realism surface: harder to validate, but closer to actual user
-traffic. On this controlled subset, deterministic dimensions had a mean raw
-drop of `2.12` points, while LLM rewrite dimensions had a mean raw drop of
-`2.95` points. The numeric lift is modest; the stronger reason to keep LLM
-rewrites is that they make the failure examples easier to recognize as
-realistic user behavior.
-
 See [docs/findings.md](docs/findings.md) for the full research note,
 per-dimension tables, McNemar results, interpretation, and limitations.
 

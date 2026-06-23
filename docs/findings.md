@@ -176,7 +176,11 @@ artifacts/analysis/article/oracle_issue_examples.csv
 > served at varying precision across providers, treat its absolute clean accuracy
 > as provider-dependent. The paired design controls for this: clean and noisy
 > prompts share the same serving route, so the degradation comparison is
-> internally valid regardless of precision.
+> internally valid regardless of precision. The served responses included
+> reasoning tokens, but the headline `telegraphic_request` GLM failures do not
+> appear to be output-cap artifacts: among the 86 clean-to-noisy failures, max
+> completion length was 612 tokens, p95 was 436, and none were near the
+> 1,024-token completion cap.
 
 ## Next Steps
 
