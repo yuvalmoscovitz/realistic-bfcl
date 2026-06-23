@@ -25,3 +25,19 @@ The first GLM-4.6 OpenRouter run used the default 256-token router output cap. T
 Raising the router output cap from 256 to 1024 changed GLM clean accuracy from 0.676 to 0.868 on the same 250 examples. Empty tool-call predictions fell from 35 to 1, and 51 examples moved from wrong to correct. This confirms the earlier 256-token GLM paired run is not suitable for model-strength conclusions.
 
 The 1024-cap clean baseline is now comparable to Haiku on the same 250 examples. To evaluate whether GLM is robust to the seven noisy dimensions, the noisy paired GLM run should be repeated with `REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS=1024`.
+
+## Cap-1024 Paired Result
+
+The seven article-facing noisy dimensions were rerun on the same 250-example pool with GLM-4.6 through OpenRouter, pinned to DeepInfra, at temperature 0 and `REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS=1024`.
+
+| dimension | clean acc | noisy acc | drop | clean-to-noisy failures | noisy-to-clean fixes | McNemar exact p |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| typos | 0.868 | 0.864 | 0.004 | 7 | 6 | 1.000 |
+| cursing | 0.868 | 0.852 | 0.016 | 10 | 6 | 0.454 |
+| irrelevant_context | 0.868 | 0.864 | 0.004 | 8 | 7 | 1.000 |
+| removed_spaces | 0.868 | 0.848 | 0.020 | 7 | 2 | 0.180 |
+| argumentative_challenge | 0.868 | 0.868 | 0.000 | 6 | 6 | 1.000 |
+| pasted_context_block | 0.868 | 0.860 | 0.008 | 11 | 9 | 0.824 |
+| telegraphic_request | 0.868 | 0.856 | 0.012 | 9 | 6 | 0.607 |
+
+This cap-corrected GLM probe does not show a statistically meaningful degradation on any single dimension. The result should be reported as a robustness/control finding, not as evidence that all capable models fail under these perturbations.
