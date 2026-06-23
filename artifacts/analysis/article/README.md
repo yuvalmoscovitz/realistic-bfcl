@@ -18,8 +18,10 @@ seven dimensions, temperature `0`, and a 1,024-token router output cap.
 
 The significant-cell review files screen the cells that drive the article-level
 claim. Nano uses the existing reviewed article artifacts. Haiku and GLM use a
-first-pass artifact screen over their significant `telegraphic_request` and
-`cursing` failures.
+first-pass artifact screen over every raw clean-to-noisy failure in their
+significant `telegraphic_request` and `cursing` cells. The summary also reports
+a deliberately conservative screened McNemar p-value: possible artifacts are
+removed from the failure side, while all noisy-to-clean fixes are retained.
 
 ## Dimension Results
 
@@ -53,7 +55,7 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 - `paired_stats.csv`: full paired contingency counts, McNemar p-values, and multiple-comparison corrections.
 - `review_filtering.csv`: raw-to-reviewed regression filtering counts.
 - `significant_cell_review.csv`: first-pass artifact screen for significant Haiku and GLM cells.
-- `significant_cell_review_summary.csv`: compact raw-vs-screened counts for significant cells, including reviewed nano counts.
+- `significant_cell_review_summary.csv`: compact raw-vs-screened counts and conservative screened McNemar p-values for significant cells, including reviewed nano counts.
 - `cross_model_failure_examples.csv`: curated true-failure and possible-artifact examples from the cross-model run.
 - `stability_repeat_summary.csv`: mean/range across repeated fresh model runs.
 - `stability_repeat_runs.csv`: per-run paired metrics used by the stability summary.

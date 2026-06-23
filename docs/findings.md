@@ -126,18 +126,29 @@ and a screened count that removes likely artifacts such as accepted-alias gaps
 (`panda` vs. `giant panda`) or baseline ambiguity (`8%` represented as `8`
 instead of `0.08`).
 
-| Model | Dimension | Raw failures | Possible artifacts | Screened likely failures |
-|---|---|---:|---:|---:|
-| `gpt-5.4-nano` | `telegraphic_request` | 98 | 23 | 75 |
-| `gpt-5.4-nano` | `pasted_context_block` | 96 | 22 | 74 |
-| `gpt-5.4-nano` | `cursing` | 97 | 29 | 67 |
-| `claude-haiku-4-5-20251001` | `telegraphic_request` | 51 | 14 | 37 |
-| `claude-haiku-4-5-20251001` | `cursing` | 30 | 10 | 20 |
-| `z-ai/glm-4.6` | `telegraphic_request` | 86 | 25 | 61 |
-| `z-ai/glm-4.6` | `cursing` | 76 | 26 | 50 |
+| Model | Dimension | Raw fail | Raw fix | Possible artifacts | Screened likely fail | Screened p |
+|---|---|---:|---:|---:|---:|---:|
+| `gpt-5.4-nano` | `telegraphic_request` | 98 | 64 | 23 | 75 | 0.396 |
+| `gpt-5.4-nano` | `pasted_context_block` | 96 | 51 | 22 | 74 | 0.049 |
+| `gpt-5.4-nano` | `cursing` | 97 | 58 | 29 | 67 | 0.474 |
+| `claude-haiku-4-5-20251001` | `telegraphic_request` | 51 | 17 | 14 | 37 | 0.009 |
+| `claude-haiku-4-5-20251001` | `cursing` | 30 | 12 | 10 | 20 | 0.215 |
+| `z-ai/glm-4.6` | `telegraphic_request` | 86 | 38 | 25 | 61 | 0.027 |
+| `z-ai/glm-4.6` | `cursing` | 76 | 43 | 26 | 50 | 0.534 |
+
+The screened p-value is deliberately conservative: it removes possible artifacts
+from the clean-to-noisy failure side, but keeps all noisy-to-clean fixes. Under
+that stricter test, none of these screened cells remains significant after
+Bonferroni correction across seven dimensions. The right article-level claim is
+therefore narrower: raw paired tests show non-random directional degradation,
+and the artifact screen shows that many of those flips are still concrete,
+auditable failures, but the screened counts should not be reported as
+correction-level significant.
 
 The nano rows use the existing reviewed article artifact. The Haiku and GLM
-rows use a first-pass significant-cell screen, not a blinded adjudication study.
+rows classify every raw clean-to-noisy failure in the significant cells with a
+first-pass researcher screen based on function names, argument diffs, evaluator
+errors, and spot-checked prompts. This is not a blinded adjudication study.
 That distinction matters: the screened counts should be read as conservative
 article-level evidence, not as final benchmark labels.
 
@@ -168,9 +179,11 @@ argument, or routing to a related but wrong function. Concrete examples are in
 - Capability does not uniformly reduce degradation; the aggregate effect is not
   a clean gradient.
 - Per-dimension McNemar counts are still reported raw because they are the
-  correct paired statistical test. The artifact screen above is a separate
-  credibility check on the significant cells. It reduces the counts, but it does
-  not erase the telegraphic or cursing signal.
+  correct paired statistical test over all paired flips. The artifact screen
+  above is a separate credibility check on the significant cells. It reduces the
+  counts substantially. Under a conservative screened-only McNemar test, the
+  cells are no longer Bonferroni-significant, although many concrete failures
+  remain.
 - The significant-cell screen is a first-pass review, not a full independent
   annotation study. Some borderline cases remain, especially where the BFCL gold
   oracle is stricter than a human might be.
