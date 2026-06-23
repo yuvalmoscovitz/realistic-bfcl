@@ -1,13 +1,20 @@
 # Realistic-BFCL Article Data
 
-These files organize the full-pool gpt-5.4-nano evaluation for article writing.
-Article counts exclude rows marked as possible oracle, augmentation, or baseline dataset issues, plus manually reviewed artifact/questionable rows.
+These files organize the article-facing Realistic-BFCL analyses.
+
+The reviewed article counts currently apply to the full-pool `gpt-5.4-nano`
+evaluation. Those counts exclude rows marked as possible oracle, augmentation,
+or baseline dataset issues, plus manually reviewed artifact/questionable rows.
 
 The Haiku files are raw model-comparison summaries for
 `claude-haiku-4-5-20251001`. They use the same frozen 2,351-example pool and
 seven dimensions, but the full-pool Haiku regressions have not yet been manually
 reviewed. The Haiku paired stats include exact McNemar p-values so weak or
 near-balanced dimensions are visible rather than overclaimed.
+
+The GLM files are raw model-comparison summaries for `z-ai/glm-4.6` through
+OpenRouter pinned to DeepInfra. They use the same frozen 2,351-example pool,
+seven dimensions, temperature `0`, and a 1,024-token router output cap.
 
 ## Dimension Results
 

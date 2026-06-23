@@ -72,6 +72,16 @@ dimensions are weak or near-balanced. The full-pool Haiku regressions have not
 yet been manually reviewed, so treat these as raw paired metrics, not final
 true-failure rates.
 
+We then ran `z-ai/glm-4.6` through OpenRouter pinned to DeepInfra, also at
+temperature `0`, with a 1,024-token router output cap. GLM's clean accuracy was
+`0.845`. The strongest full-pool signal was again `telegraphic_request`: noisy
+accuracy fell to `0.825`, with 86 clean-success/noisy-failure cases versus 38
+clean-failure/noisy-success cases, McNemar exact `p = 0.000019`. `cursing` was
+also directional. Other dimensions were weaker, and `pasted_context_block` was
+near-null for GLM. The more careful reading is not "all models break"; it is
+that realistic messiness exposes a real paired failure surface, but the effect
+depends strongly on model capability and noise type.
+
 We also ran a controlled 250-example comparison on a rewrite-suitable subset.
 Deterministic augmentations are the auditable control surface: easy to
 reproduce, inspect, and reject when they touch oracle-bearing content. LLM
