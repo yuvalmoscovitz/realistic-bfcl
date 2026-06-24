@@ -26,7 +26,7 @@ What's cost of 2 and 4 GB RAM machine on AWS EC2 with one CPU?
 Realistic noisy prompt:
 
 ```text
-aws pricing calculator makes no sense. i just want an ec2 machine that has 2 gigabytes of ram and 1 cpu. also the 4gb one. how much is it
+aws ec2 2gb 1cpu price and 4gb 1cpu price pls
 ```
 
 The tool schema and gold answer are unchanged. The model should still call the
@@ -92,9 +92,10 @@ malformed outputs.
 
 That is the can-vs.-will gap made concrete. Every model here *can* price two
 machines when asked in clean prose, and the clean benchmark confirms it. But the
-moment the request arrives as `aws ec2 2gb 4gb 1cpu price`, the model that
-passed the clean test starts dropping the second machine. Clean evals never show
-you that, because clean prompts are never written that way.
+moment the request arrives as
+`aws ec2 2gb 1cpu price and 4gb 1cpu price pls`, the model that passed the clean
+test starts dropping the second machine. Clean evals never show you that,
+because clean prompts are never written that way.
 
 See [docs/findings.md](docs/findings.md) for the full research note,
 per-dimension tables, McNemar results, interpretation, and limitations.
