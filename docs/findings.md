@@ -118,6 +118,47 @@ The shape across capability: the cheap model is broadly fragile. Pasted context,
 profanity, terseness, and irrelevant context all register. Capable models drop
 almost all of that, but not terseness.
 
+## Artifact Screen
+
+Raw clean-to-noisy failures include real model failures and evaluator/oracle
+edge cases. We therefore keep two views: the raw paired McNemar counts above,
+and a screened count that removes likely artifacts such as accepted-alias gaps
+(`panda` vs. `giant panda`) or baseline ambiguity (`8%` represented as `8`
+instead of `0.08`).
+
+| Model | Dimension | Raw fail | Raw fix | Screened fail | Screened fix | Symmetric p | Bonf. p |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `gpt-5.4-nano` | `telegraphic_request` | 98 | 64 | 75 | - | - | - |
+| `gpt-5.4-nano` | `pasted_context_block` | 96 | 51 | 74 | - | - | - |
+| `gpt-5.4-nano` | `cursing` | 97 | 58 | 67 | - | - | - |
+| `claude-haiku-4-5-20251001` | `telegraphic_request` | 51 | 17 | 37 | 7 | 5.3e-6 | 3.7e-5 |
+| `claude-haiku-4-5-20251001` | `cursing` | 30 | 12 | 20 | 7 | 0.019 | 0.134 |
+| `z-ai/glm-4.6` | `telegraphic_request` | 86 | 38 | 61 | 19 | 2.7e-6 | 1.9e-5 |
+| `z-ai/glm-4.6` | `cursing` | 76 | 43 | 50 | 23 | 0.002 | 0.015 |
+
+The screened p-value applies the artifact screen symmetrically: possible
+artifacts are removed from both clean-to-noisy failures and noisy-to-clean
+fixes, then McNemar is recomputed. That matters. A one-sided screen, removing
+only failure artifacts while keeping all fixes, biases the test toward the null.
+The symmetric screen restores the main result for `telegraphic_request` on both
+capable models and for `cursing` on GLM-4.6. Haiku `cursing` remains weaker.
+
+The nano rows use the existing reviewed article artifact for clean-to-noisy
+failures. The matching full first-run noisy-to-clean fix review is not available
+in the checked-in article artifact, so no symmetric screened p-value is reported
+for nano.
+
+The Haiku and GLM rows classify every raw discordant item in both directions for
+the significant cells with a first-pass researcher screen based on function
+names, argument diffs, evaluator errors, and spot-checked prompts. This is not a
+blinded adjudication study. That distinction matters: the screened counts should
+be read as conservative article-level evidence, not as final benchmark labels.
+
+The remaining failures are not mostly crashes. They are plausible-looking wrong
+tool calls: missing the second item in a multi-call request, changing a required
+argument, or routing to a related but wrong function. Concrete examples are in
+`artifacts/analysis/article/cross_model_failure_examples.csv`.
+
 ## Interpretation
 
 1. Clean BFCL accuracy does not certify robustness to realistic phrasing. Even a
@@ -139,13 +180,15 @@ almost all of that, but not terseness.
   agentic benchmark.
 - Capability does not uniformly reduce degradation; the aggregate effect is not
   a clean gradient.
-- Per-dimension counts are **raw paired flips**. McNemar establishes that the
-  significant flips are non-random, but not that every flip is a true phrasing
-  failure rather than an oracle artifact, such as `panda` vs. `giant panda` or a
-  brand-name vs. localized string. Manual review of the significant cells
-  (`telegraphic_request`, `cursing`, and nano's `pasted_context_block`) is the
-  remaining step to make those counts airtight. Non-significant dimensions do
-  not require review for the current article-level claim.
+- Per-dimension McNemar counts are still reported raw because they are the
+  correct paired statistical test over all paired flips. The artifact screen
+  above is a separate credibility check on the significant cells. It reduces
+  both directions substantially. Under the symmetric screened test,
+  `telegraphic_request` remains Bonferroni-significant for both capable models;
+  `cursing` remains significant for GLM-4.6 but not Haiku.
+- The significant-cell screen is a first-pass review, not a full independent
+  annotation study. Some borderline cases remain, especially where the BFCL gold
+  oracle is stricter than a human might be.
 - A context-length dose-response probe, scaling pasted-context size, did **not**
   find that longer inert context amplifies the phrasing penalty. On a small nano
   run the trend was flat to slightly reversed. Inert filler is the weakest form
@@ -165,6 +208,10 @@ Key artifacts:
 ```text
 artifacts/analysis/article/paired_stats.csv
 artifacts/analysis/article/model_comparison.csv
+artifacts/analysis/article/significant_cell_review_summary.csv
+artifacts/analysis/article/significant_cell_review.csv
+artifacts/analysis/article/significant_cell_fix_review.csv
+artifacts/analysis/article/cross_model_failure_examples.csv
 artifacts/analysis/article/haiku_full_pool_summary.csv
 artifacts/analysis/article/glm46_full_pool_paired_summary.csv
 artifacts/analysis/article/included_failure_examples.csv
@@ -184,7 +231,7 @@ artifacts/analysis/article/oracle_issue_examples.csv
 
 ## Next Steps
 
-1. Manually review the significant cells (`telegraphic_request`, `cursing`, and
-   nano's `pasted_context_block`) to strip any oracle artifacts.
+1. If this grows from article to benchmark paper, repeat the significant-cell
+   screen with independent adjudication.
 2. Position this probe relative to prior work on paraphrase and format
    sensitivity in BFCL-style evaluation.

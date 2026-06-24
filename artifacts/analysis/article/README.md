@@ -16,6 +16,14 @@ The GLM files are raw model-comparison summaries for `z-ai/glm-4.6` through
 OpenRouter pinned to DeepInfra. They use the same frozen 2,351-example pool,
 seven dimensions, temperature `0`, and a 1,024-token router output cap.
 
+The significant-cell review files screen the cells that drive the article-level
+claim. Nano uses the existing reviewed article artifacts for clean-to-noisy
+failures. Haiku and GLM use a first-pass artifact screen over every raw
+discordant item in both directions for their significant `telegraphic_request`
+and `cursing` cells. The summary reports symmetric screened McNemar p-values:
+possible artifacts are removed from both failures and fixes before recomputing
+the paired test.
+
 ## Dimension Results
 
 | Dimension | Clean acc. | Noisy acc. | Drop | Article regressions | Article rate |
@@ -47,6 +55,10 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 - `dimension_results.csv`: article-ready per-dimension metrics.
 - `paired_stats.csv`: full paired contingency counts, McNemar p-values, and multiple-comparison corrections.
 - `review_filtering.csv`: raw-to-reviewed regression filtering counts.
+- `significant_cell_review.csv`: first-pass artifact screen for clean-to-noisy failures in significant Haiku and GLM cells.
+- `significant_cell_fix_review.csv`: first-pass artifact screen for noisy-to-clean fixes in significant Haiku and GLM cells.
+- `significant_cell_review_summary.csv`: compact raw-vs-screened counts and symmetric screened McNemar p-values for significant cells, including reviewed nano failure counts.
+- `cross_model_failure_examples.csv`: curated true-failure and possible-artifact examples from the cross-model run.
 - `stability_repeat_summary.csv`: mean/range across repeated fresh model runs.
 - `stability_repeat_runs.csv`: per-run paired metrics used by the stability summary.
 - `stability_repeat_summary.json`: JSON form of the stability summary.
