@@ -83,11 +83,12 @@ both capable models. Profanity, captured by `cursing`, is a secondary signal.
 significant degradation on the cheap model, but a coin flip on both capable
 models.
 
-A first-pass artifact screen reduces the raw significant-cell counts but still
-leaves many concrete failures: mostly plausible-looking wrong tool calls,
-dropped calls, or wrong arguments, not malformed outputs. Under a deliberately
-conservative screened-only McNemar test, those cells should no longer be
-described as correction-level significant.
+A symmetric first-pass artifact screen for Haiku and GLM reduces both
+clean-to-noisy failures and noisy-to-clean fixes. `telegraphic_request` remains
+significant for both capable models after that screen; GLM-4.6 `cursing` also
+survives, while Haiku `cursing` does not. The remaining failures are mostly
+plausible-looking wrong tool calls, dropped calls, or wrong arguments, not
+malformed outputs.
 
 That is the can-vs.-will gap made concrete. Every model here *can* price two
 machines when asked in clean prose, and the clean benchmark confirms it. But the
