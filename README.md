@@ -61,12 +61,14 @@ We ran the same 2,351-example BFCL-derived paired evaluation across three
 models: a cheap model, a capable mid-tier model, and a strong open
 function-calling model. All runs used temperature `0`, deterministic
 oracle-preserving rewrites, and exact McNemar tests on paired flips.
+Drop values are absolute percentage-point drops (`pp`), not relative percent
+change.
 
 | Model | Pool | Clean acc. | Avg noisy acc. | Avg drop |
 |---|---:|---:|---:|---:|
-| `gpt-5.4-nano` | 2,351 | 0.761 | 0.749 | 0.012 |
-| `claude-haiku-4-5-20251001` | 2,351 | 0.832 | 0.827 | 0.005 |
-| `z-ai/glm-4.6` | 2,351 | 0.845 | 0.836 | 0.009 |
+| `gpt-5.4-nano` | 2,351 | 76.1% | 74.9% | 1.2 pp |
+| `claude-haiku-4-5-20251001` | 2,351 | 83.2% | 82.7% | 0.5 pp |
+| `z-ai/glm-4.6` | 2,351 | 84.5% | 83.6% | 0.9 pp |
 
 The effect is **not** "messy prompts break every model equally," and it is
 **not** a clean capability gradient. Aggregate degradation is largest on the
