@@ -48,7 +48,7 @@ change.
 | Model | Provider | Tier | Clean acc. | Avg noisy acc. | Avg drop |
 |---|---|---|---:|---:|---:|
 | `gpt-5.4-nano` | OpenAI | cheap | 76.1% | 74.9% | 1.2 pp |
-| `claude-haiku-4-5-20251001` | Anthropic | mid | 83.2% | 82.7% | 0.5 pp |
+| `claude-haiku-4-5-20251001` | Anthropic | mid | 83.2% | 82.6% | 0.5 pp |
 | `z-ai/glm-4.6` | OpenRouter | strong-open | 84.5% | 83.6% | 0.9 pp |
 
 Clean accuracy rises across these three models, from `76.1%` to `83.2%` to

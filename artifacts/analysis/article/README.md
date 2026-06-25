@@ -52,6 +52,8 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 
 ## Files
 
+- `unified_report.md`: consolidated article-facing report with coverage, model results, error taxonomy, screened cells, and strict all-three-model failures.
+- `all_three_wrong_examples.csv`: strict clean-correct/noisy-wrong examples shared by all three models, using nano `repeat_2` for full-pool coverage.
 - `dimension_results.csv`: article-ready per-dimension metrics.
 - `paired_stats.csv`: full paired contingency counts, McNemar p-values, and multiple-comparison corrections.
 - `review_filtering.csv`: raw-to-reviewed regression filtering counts.

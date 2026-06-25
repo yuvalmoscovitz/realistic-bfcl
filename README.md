@@ -67,7 +67,7 @@ change.
 | Model | Pool | Clean acc. | Avg noisy acc. | Avg drop |
 |---|---:|---:|---:|---:|
 | `gpt-5.4-nano` | 2,351 | 76.1% | 74.9% | 1.2 pp |
-| `claude-haiku-4-5-20251001` | 2,351 | 83.2% | 82.7% | 0.5 pp |
+| `claude-haiku-4-5-20251001` | 2,351 | 83.2% | 82.6% | 0.5 pp |
 | `z-ai/glm-4.6` | 2,351 | 84.5% | 83.6% | 0.9 pp |
 
 The effect is **not** "messy prompts break every model equally," and it is
