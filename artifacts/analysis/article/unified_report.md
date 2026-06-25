@@ -35,6 +35,22 @@ Drop values are absolute percentage-point drops (`pp`), not relative percent cha
 
 Nano rows use reviewed clean-to-noisy failures only; a matching full first-run fix-side screen is not checked in. Haiku and GLM rows screen both discordant directions.
 
+## Full Clean-Pass/Noisy-Fail Table
+
+The exhaustive examples are in `all_bad_examples.csv`: one row per model,
+dimension, and base example where the clean prompt was correct and the noisy
+prompt was wrong. It includes the clean prompt, noisy prompt, gold oracle, clean
+prediction, and noisy prediction.
+
+| Model | Clean-pass/noisy-fail rows |
+|---|---:|
+| `gpt-5.4-nano` | 621 |
+| `claude-haiku-4-5-20251001` | 184 |
+| `z-ai/glm-4.6` | 417 |
+| **Total** | **1222** |
+
+The compact count table is in `all_bad_examples_summary.csv`.
+
 ## Error Taxonomy
 
 ### Nano Reviewed Article Failures
@@ -79,6 +95,8 @@ Found `8` strict all-three failures. Full rows are in `all_three_wrong_examples.
 | File | Rows | Meaning |
 |---|---:|---|
 | `cross_model_failure_examples.csv` | 10 | Small curated examples across models plus artifact controls. |
+| `all_bad_examples.csv` | 1222 | Exhaustive clean-correct/noisy-wrong rows across all three article-facing model runs. |
+| `all_bad_examples_summary.csv` | 21 | Counts from the exhaustive failure table by model and dimension. |
 | `included_failure_examples.csv` | 20 | Curated nano article examples. |
 | `candidate_failure_examples.csv` | 40 | Candidate examples considered for article inclusion. |
 | `significant_cell_review.csv` | 243 | Haiku/GLM clean-to-noisy significant-cell screen. |
@@ -91,4 +109,3 @@ Found `8` strict all-three failures. Full rows are in `all_three_wrong_examples.
 - The strongest reviewed failure evidence is not one monolithic file; it is split by purpose: aggregate stats, significant-cell screens, curated examples, and strict cross-model intersections.
 - The common failure modes are plausible wrong tool calls: wrong arguments, dropped/extra calls, and wrong routing. Malformed calls are rare in the reviewed nano taxonomy.
 - Several strict all-three failures are evaluator-strict exact-string cases, so they should be used carefully. The most interpretable shared failures are the cursing examples that include profanity in an argument and the telegraphic weather example that resolves `tomorrow` to the current date.
-
