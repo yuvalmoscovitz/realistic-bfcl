@@ -18,7 +18,7 @@ Start here:
 
 - Full research note: [docs/findings.md](docs/findings.md)
 - Article result bundle: [artifacts/analysis/article/](artifacts/analysis/article/)
-- Exhaustive failure table: [artifacts/analysis/article/all_bad_examples.csv](artifacts/analysis/article/all_bad_examples.csv)
+- Exhaustive failure table: [artifacts/analysis/article/clean_to_noisy_failures.csv](artifacts/analysis/article/clean_to_noisy_failures.csv)
 
 ## Minimal Example
 
@@ -114,7 +114,7 @@ The small article-facing analysis bundle is checked in under
 predictions, and intermediate analysis files remain ignored.
 
 The main failure table is
-`artifacts/analysis/article/all_bad_examples.csv`: every row where the same
+`artifacts/analysis/article/clean_to_noisy_failures.csv`: every row where the same
 model was correct on the clean prompt and wrong on the augmented prompt, with
 the clean prompt, noisy prompt, gold oracle, and both predictions.
 
@@ -173,7 +173,7 @@ scripts/
   run_stage.py                 Single entry point for research steps.
 Makefile                       Human-facing research commands.
 artifacts/analysis/article/
-  all_bad_examples.csv         Exhaustive clean-correct/noisy-wrong rows.
+  clean_to_noisy_failures.csv         Exhaustive clean-correct/noisy-wrong rows.
   model_comparison.csv         Cross-model clean/noisy comparison.
   paired_stats.csv             Paired McNemar statistics.
 ```

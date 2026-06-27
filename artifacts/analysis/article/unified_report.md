@@ -37,7 +37,7 @@ Nano rows use reviewed clean-to-noisy failures only; a matching full first-run f
 
 ## Full Clean-Pass/Noisy-Fail Table
 
-The exhaustive examples are in `all_bad_examples.csv`: one row per model,
+The exhaustive examples are in `clean_to_noisy_failures.csv`: one row per model,
 dimension, and base example where the clean prompt was correct and the noisy
 prompt was wrong. It includes the clean prompt, noisy prompt, gold oracle, clean
 prediction, and noisy prediction.
@@ -49,7 +49,7 @@ prediction, and noisy prediction.
 | `z-ai/glm-4.6` | 417 |
 | **Total** | **1222** |
 
-The compact count table is in `all_bad_examples_summary.csv`.
+The compact count table is in `clean_to_noisy_failures_summary.csv`.
 
 ## Error Taxonomy
 
@@ -95,8 +95,8 @@ Found `8` strict all-three failures. Full rows are in `all_three_wrong_examples.
 | File | Rows | Meaning |
 |---|---:|---|
 | `cross_model_failure_examples.csv` | 10 | Small curated examples across models plus artifact controls. |
-| `all_bad_examples.csv` | 1222 | Exhaustive clean-correct/noisy-wrong rows across all three article-facing model runs. |
-| `all_bad_examples_summary.csv` | 21 | Counts from the exhaustive failure table by model and dimension. |
+| `clean_to_noisy_failures.csv` | 1222 | Exhaustive clean-correct/noisy-wrong rows across all three article-facing model runs. |
+| `clean_to_noisy_failures_summary.csv` | 21 | Counts from the exhaustive failure table by model and dimension. |
 | `included_failure_examples.csv` | 20 | Curated nano article examples. |
 | `candidate_failure_examples.csv` | 40 | Candidate examples considered for article inclusion. |
 | `significant_cell_review.csv` | 243 | Haiku/GLM clean-to-noisy significant-cell screen. |

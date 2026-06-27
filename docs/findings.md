@@ -165,7 +165,7 @@ argument, or routing to a related but wrong function. Concrete examples are in
 ## Full Failure Table And Examples
 
 The exhaustive file for the article claim is
-`artifacts/analysis/article/all_bad_examples.csv`. It contains every
+`artifacts/analysis/article/clean_to_noisy_failures.csv`. It contains every
 clean-correct/noisy-wrong row across the three article-facing model runs, with
 the clean prompt, noisy prompt, gold oracle, clean prediction, and noisy
 prediction.
@@ -244,8 +244,8 @@ Key artifacts:
 ```text
 artifacts/analysis/article/paired_stats.csv
 artifacts/analysis/article/model_comparison.csv
-artifacts/analysis/article/all_bad_examples.csv
-artifacts/analysis/article/all_bad_examples_summary.csv
+artifacts/analysis/article/clean_to_noisy_failures.csv
+artifacts/analysis/article/clean_to_noisy_failures_summary.csv
 artifacts/analysis/article/significant_cell_review_summary.csv
 artifacts/analysis/article/significant_cell_review.csv
 artifacts/analysis/article/significant_cell_fix_review.csv
