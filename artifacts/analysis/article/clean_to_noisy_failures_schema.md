@@ -21,7 +21,7 @@ Primary key: `row_id`.
 | `category` | BFCL category. |
 | `review_status` | Manual review status. |
 | `review_scope` | Review scope for the row. |
-| `review_label` | `true_model_failure` or `possible_oracle_artifact`. |
+| `review_label` | `true_model_failure`, `possible_oracle_artifact`, or `uncertain`. |
 | `screened_failure_type` | Failure type assigned during review. |
 | `review_notes` | Short reviewer note explaining the label. |
 | `clean_prompt` | Original clean user prompt. |
@@ -38,6 +38,8 @@ Primary key: `row_id`.
 | `clean_provider_response_id` | Provider response id for the clean call. |
 | `noisy_provider_response_id` | Provider response id for the noisy call. |
 
-All rows in this file have been reviewed. Review labels are row-level
-artifact-screen labels, not the broader article-inclusion labels from
+All rows in this file have been reviewed. Rows first labeled
+`possible_oracle_artifact` received a second-pass artifact audit; 90 were
+promoted to `true_model_failure` and 1 remains `uncertain`. Review labels are
+row-level artifact-screen labels, not the broader article-inclusion labels from
 `docs/annotation_protocol.md`.

@@ -105,16 +105,19 @@ Important columns:
 - `expected_tool_calls`: BFCL accepted tool-call oracle for the prompt.
 - `review_status`: manual review status.
 - `review_scope`: review scope for the row.
-- `review_label`: `true_model_failure` or `possible_oracle_artifact`.
+- `review_label`: `true_model_failure`, `possible_oracle_artifact`, or
+  `uncertain`.
 - `screened_failure_type`: type assigned during row-level artifact screening.
   This is separate from the broader inclusion labels in `docs/annotation_protocol.md`.
 - `review_notes`: short reviewer note explaining the label.
 - `noisy_completion_tokens_if_available`: blank where the serving path did not
   log completion tokens, notably the GLM-4.6 OpenRouter run.
 
-All rows in the CSV have been reviewed: 614 are labeled `true_model_failure` and
-608 are labeled `possible_oracle_artifact`. The CSV is self-contained for public
-inspection: prompts, expected calls, model calls, evaluator errors, review notes,
-and provider response ids are embedded. It should be treated as the authoritative
-row-level trace table even when an intermediate generated JSONL source is not
-checked in for every dimension.
+All rows in the CSV have been reviewed. A second-pass audit checked every row
+initially labeled `possible_oracle_artifact`; 90 were promoted to
+`true_model_failure` and 1 remains `uncertain`. The final split is 704
+`true_model_failure`, 517 `possible_oracle_artifact`, and 1 `uncertain`. The CSV
+is self-contained for public inspection: prompts, expected calls, model calls,
+evaluator errors, review notes, and provider response ids are embedded. It
+should be treated as the authoritative row-level trace table even when an
+intermediate generated JSONL source is not checked in for every dimension.

@@ -184,12 +184,15 @@ headline aggregate counts.
 
 Every row in this table has been reviewed:
 
-| Model | `true_model_failure` | `possible_oracle_artifact` |
-|---|---:|---:|
-| `gpt-5.4-nano` | 331 | 290 |
-| `claude-haiku-4-5-20251001` | 64 | 120 |
-| `z-ai/glm-4.6` | 219 | 198 |
-| **Total** | **614** | **608** |
+Rows initially labeled `possible_oracle_artifact` received a second-pass audit;
+90 were promoted to `true_model_failure` and 1 remains `uncertain`.
+
+| Model | `true_model_failure` | `possible_oracle_artifact` | `uncertain` |
+|---|---:|---:|---:|
+| `gpt-5.4-nano` | 387 | 234 | 0 |
+| `claude-haiku-4-5-20251001` | 80 | 104 | 0 |
+| `z-ai/glm-4.6` | 237 | 179 | 1 |
+| **Total** | **704** | **517** | **1** |
 
 Some concrete inspectable failures:
 

@@ -53,12 +53,15 @@ ids, explicit review status, and review notes.
 Every row has been reviewed. The row-level screen splits the raw failures as
 follows:
 
-| Model | `true_model_failure` | `possible_oracle_artifact` |
-|---|---:|---:|
-| `gpt-5.4-nano` | 331 | 290 |
-| `claude-haiku-4-5-20251001` | 64 | 120 |
-| `z-ai/glm-4.6` | 219 | 198 |
-| **Total** | **614** | **608** |
+Rows initially labeled `possible_oracle_artifact` received a second-pass audit;
+90 were promoted to `true_model_failure` and 1 remains `uncertain`.
+
+| Model | `true_model_failure` | `possible_oracle_artifact` | `uncertain` |
+|---|---:|---:|---:|
+| `gpt-5.4-nano` | 387 | 234 | 0 |
+| `claude-haiku-4-5-20251001` | 80 | 104 | 0 |
+| `z-ai/glm-4.6` | 237 | 179 | 1 |
+| **Total** | **704** | **517** | **1** |
 
 The compact count table is in `clean_to_noisy_failures_summary.csv`. These are
 row-level trace counts by `evaluation_run_id`, including reviewed true-failure
