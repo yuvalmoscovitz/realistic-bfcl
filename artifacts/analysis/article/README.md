@@ -53,9 +53,10 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 ## Files
 
 - `unified_report.md`: consolidated article-facing report with coverage, model results, error taxonomy, screened cells, and strict all-three-model failures.
-- `clean_to_noisy_failures.csv`: exhaustive clean-correct/noisy-wrong examples across the three article-facing model runs, with clean prompt, noisy prompt, gold oracle, and both predictions.
-- `clean_to_noisy_failures_summary.csv`: compact counts for `clean_to_noisy_failures.csv` by model and dimension.
-- `all_three_wrong_examples.csv`: strict clean-correct/noisy-wrong examples shared by all three models, using nano `repeat_2` for full-pool coverage.
+- `clean_to_noisy_failures.csv`: exhaustive clean-correct/noisy-wrong trace rows across the three article-facing models, with a stable row id, run metadata, clean prompt, noisy prompt, expected BFCL tool calls, clean model calls, noisy model calls, evaluator error, provider response ids, and explicit review status.
+- `clean_to_noisy_failures_schema.md`: column definitions and review-label caveats for `clean_to_noisy_failures.csv`.
+- `clean_to_noisy_failures_summary.csv`: compact counts for `clean_to_noisy_failures.csv` by model, evaluation run, and dimension.
+- `all_three_wrong_examples.csv`: strict clean-correct/noisy-wrong examples shared by all three models, using nano `gpt54nano_full_pool_repeat2` for full-pool coverage.
 - `dimension_results.csv`: article-ready per-dimension metrics.
 - `paired_stats.csv`: full paired contingency counts, McNemar p-values, and multiple-comparison corrections.
 - `review_filtering.csv`: raw-to-reviewed regression filtering counts.
@@ -82,3 +83,36 @@ The evaluation was repeated three times with fresh clean and noisy model calls. 
 - `glm46_full_pool_paired_summary.json`: JSON form of the full-pool GLM-4.6 paired metrics.
 - `model_comparison.csv`: full-pool per-model/per-dimension comparison for nano, Haiku, and GLM-4.6.
 - `model_comparison.json`: JSON form of the model comparison table.
+
+## Notes On `clean_to_noisy_failures.csv`
+
+This is the row-level audit table, not the aggregate statistics table. Use
+`paired_stats.csv` and `model_comparison.csv` for headline counts and McNemar
+statistics.
+
+Important columns:
+
+- `row_id`: stable unique key, formed from model, evaluation run, dimension, and
+  base id. `noisy_id` is not unique across models.
+- `evaluation_run_id`: named source run for the row.
+- `evaluation_run_role`: whether this is the primary full-pool row trace or a
+  repeat used for row-level traceability. `gpt54nano_full_pool_repeat2` is a
+  full-pool nano repeat; the headline nano statistics remain in
+  `paired_stats.csv`.
+- `pool_size`, `temperature`, `repeat_index`: run metadata for quick inspection.
+- `expected_tool_calls`: BFCL accepted tool-call oracle for the prompt.
+- `review_status`: `reviewed` only for rows included in the significant-cell
+  manual screen; otherwise `not_reviewed`.
+- `review_scope`: explains why a row has or lacks manual screening.
+- `review_label`: `true_model_failure`, `possible_oracle_artifact`, or
+  `not_reviewed`.
+- `screened_failure_type`: type assigned by the significant-cell screen, or
+  `not_reviewed`. This is separate from the broader inclusion labels in
+  `docs/annotation_protocol.md`.
+- `noisy_completion_tokens_if_available`: blank where the serving path did not
+  log completion tokens, notably the GLM-4.6 OpenRouter run.
+
+The CSV is self-contained for public inspection: prompts, expected calls, model
+calls, evaluator errors, and provider response ids are embedded. It should be
+treated as the authoritative row-level trace table even when an intermediate
+generated JSONL source is not checked in for every dimension.

@@ -114,9 +114,11 @@ The small article-facing analysis bundle is checked in under
 predictions, and intermediate analysis files remain ignored.
 
 The main failure table is
-`artifacts/analysis/article/clean_to_noisy_failures.csv`: every row where the same
-model was correct on the clean prompt and wrong on the augmented prompt, with
-the clean prompt, noisy prompt, gold oracle, and both predictions.
+`artifacts/analysis/article/clean_to_noisy_failures.csv`: row-level traces where
+the same model was correct on the clean prompt and wrong on the augmented
+prompt, with the clean prompt, noisy prompt, expected BFCL tool calls, both
+model calls, evaluator error, provider response ids, and explicit review status.
+Use `paired_stats.csv` and `model_comparison.csv` for headline aggregate counts.
 
 Three inspectable examples from that table:
 

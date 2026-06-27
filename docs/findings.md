@@ -170,8 +170,10 @@ is not the showcase failure list.
 The exhaustive file for the article claim is
 `artifacts/analysis/article/clean_to_noisy_failures.csv`. It contains every
 clean-correct/noisy-wrong row across the three article-facing model runs, with
-the clean prompt, noisy prompt, gold oracle, clean prediction, and noisy
-prediction.
+the clean prompt, noisy prompt, expected BFCL tool calls, clean model calls,
+noisy model calls, evaluator error, provider response ids, and explicit review
+status. Use `paired_stats.csv` and `model_comparison.csv` for headline aggregate
+counts.
 
 | Model | Clean-correct/noisy-wrong rows |
 |---|---:|
