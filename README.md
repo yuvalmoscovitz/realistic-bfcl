@@ -123,9 +123,10 @@ Three inspectable examples from that table:
 - **Dropped call**: `parallel_multiple_27` (GLM-4.6, `telegraphic_request`).
   The clean prompt asks to transfer `$5000` and calculate interest. The terse
   prompt preserves both tasks, but the model only calls the interest calculator.
-- **Wrong tool**: `live_multiple_1025-254-0` (GLM-4.6, `telegraphic_request`).
-  The prompt asks for the maintenance config for `sandcastle`; the terse prompt
-  routes to the list-all-configs function instead of the lookup for that id.
+- **Wrong tool**: `live_multiple_718-165-5` (GLM-4.6, `telegraphic_request`).
+  The clean prompt asks to book a house in Austin. The terse prompt still asks
+  to book it, but the model calls the house search tool instead of the booking
+  tool.
 - **Wrong date argument across models**: `live_multiple_676-163-1`
   (`telegraphic_request`). The prompt asks for New York weather tomorrow and
   states that today is `2023.10.1`; the noisy run fetches `2023-10-01` instead
@@ -173,7 +174,7 @@ scripts/
   run_stage.py                 Single entry point for research steps.
 Makefile                       Human-facing research commands.
 artifacts/analysis/article/
-  clean_to_noisy_failures.csv         Exhaustive clean-correct/noisy-wrong rows.
+  clean_to_noisy_failures.csv  Exhaustive clean-correct/noisy-wrong rows.
   model_comparison.csv         Cross-model clean/noisy comparison.
   paired_stats.csv             Paired McNemar statistics.
 ```
