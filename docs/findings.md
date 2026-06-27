@@ -162,6 +162,39 @@ tool calls: missing the second item in a multi-call request, changing a required
 argument, or routing to a related but wrong function. Concrete examples are in
 `artifacts/analysis/article/cross_model_failure_examples.csv`.
 
+## Full Failure Table And Examples
+
+The exhaustive file for the article claim is
+`artifacts/analysis/article/all_bad_examples.csv`. It contains every
+clean-correct/noisy-wrong row across the three article-facing model runs, with
+the clean prompt, noisy prompt, gold oracle, clean prediction, and noisy
+prediction.
+
+| Model | Clean-correct/noisy-wrong rows |
+|---|---:|
+| `gpt-5.4-nano` | 621 |
+| `claude-haiku-4-5-20251001` | 184 |
+| `z-ai/glm-4.6` | 417 |
+| **Total** | **1222** |
+
+Some concrete inspectable failures:
+
+- **Dropped call**: `parallel_multiple_27` (GLM, `telegraphic_request`). Clean
+  prompt asks to transfer `$5000` and calculate interest. The telegraphic prompt
+  keeps both tasks, but the model only calls the interest calculator.
+- **Wrong tool**: `live_multiple_718-165-5` (GLM, `telegraphic_request`). Clean
+  prompt asks to book a house in Austin. The telegraphic prompt still asks to
+  book it, but the model calls the house search tool instead of the booking
+  tool.
+- **Wrong date argument across models**: `live_multiple_676-163-1`
+  (`telegraphic_request`). Clean prompt asks for New York weather tomorrow and
+  states today is `2023.10.1`. The noisy prompt preserves that information, but
+  GPT, Haiku, and GLM all produce `2023-10-01` instead of the gold
+  `2023-10-02` in at least one article-facing run.
+- **Profanity flips routing**: `live_multiple_992-223-0` (GLM, `cursing`). Clean
+  prompt asks to delete the Apdex config for `d0404`. The profane rewrite still
+  asks for deletion, but the model calls the list/get configuration tool.
+
 ## Interpretation
 
 1. Clean BFCL accuracy does not certify robustness to realistic phrasing. Even a
@@ -211,6 +244,8 @@ Key artifacts:
 ```text
 artifacts/analysis/article/paired_stats.csv
 artifacts/analysis/article/model_comparison.csv
+artifacts/analysis/article/all_bad_examples.csv
+artifacts/analysis/article/all_bad_examples_summary.csv
 artifacts/analysis/article/significant_cell_review_summary.csv
 artifacts/analysis/article/significant_cell_review.csv
 artifacts/analysis/article/significant_cell_fix_review.csv

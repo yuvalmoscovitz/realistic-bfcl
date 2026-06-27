@@ -5,11 +5,10 @@ agent *can* do the task. They do not tell you whether it *will* once a real user
 phrases the request the way real users actually do.
 
 Realistic-BFCL is a realism-controlled metamorphic benchmark layer over the
-Berkeley Function Calling Leaderboard (BFCL) built to measure that gap. It keeps
-BFCL's trusted gold oracle, then rephrases each prompt the way production
-traffic arrives: terse, casual, impatient, padded with context, occasionally
-rude. Then it checks whether the same model still makes the same correct tool
-call.
+Berkeley Function Calling Leaderboard (BFCL). It keeps BFCL's trusted gold
+oracle, then rephrases each prompt the way production traffic arrives: terse,
+casual, impatient, padded with context, occasionally rude. Then it checks
+whether the same model still makes the same correct tool call.
 
 The research question is whether high clean BFCL scores imply robust real-world
 tool routing. They mostly do for capable models, but not entirely, and the gap
@@ -36,8 +35,8 @@ the tool once, that is a paired clean-success/noisy-failure regression.
 ## Core Claim
 
 BFCL provides the trusted deterministic evaluation substrate. Realistic-BFCL
-adds realistic conversational transformations on top of BFCL while preserving
-the gold tool-call oracle. The benchmark is designed for paired evaluation:
+adds realistic conversational transformations on top while preserving the gold
+tool-call oracle. The benchmark is designed for matched-pair evaluation:
 
 ```text
 same base example
@@ -46,16 +45,17 @@ same model
 clean prompt vs. realistic noisy prompt
 ```
 
-The noisy prompt must preserve the original function name and arguments unless
-the transformation explicitly models correction or self-repair. In that case,
-the final oracle must be well-defined and derived from the clean oracle.
+A noisy prompt counts only if the gold tool call is unchanged. Deterministic
+checks reject rewrites that alter numbers, quoted strings, or visible gold
+argument values.
 
 ## Current Findings
 
-The short version: **clean BFCL accuracy overstates how robust a model is to the
-way people actually type, and the clean benchmark cannot see the gap.** It is
-small on capable models and larger on cheap ones, but it is real and it
-concentrates in ordinary user input.
+The short version: **clean BFCL accuracy overstates robustness to the way people
+actually type, and the clean benchmark cannot see the gap.** The aggregate drop
+is small, which is exactly why it is easy to miss, but underneath it are
+reproducible, inspectable regressions: prompts the model gets right in clean
+prose and wrong after a realistic rewrite.
 
 We ran the same 2,351-example BFCL-derived paired evaluation across three
 models: a cheap model, a capable mid-tier model, and a strong open
@@ -100,11 +100,17 @@ test starts dropping the second machine. Clean evals never show you that,
 because clean prompts are never written that way.
 
 See [docs/findings.md](docs/findings.md) for the full research note,
-per-dimension tables, McNemar results, interpretation, and limitations.
+per-dimension tables, McNemar results, verified examples, interpretation, and
+limitations.
 
 The small article-facing analysis bundle is checked in under
 `artifacts/analysis/article/` for inspection. Larger generated datasets,
 predictions, and intermediate analysis files remain ignored.
+
+The main failure table is
+`artifacts/analysis/article/all_bad_examples.csv`: every row where the same
+model was correct on the clean prompt and wrong on the augmented prompt, with
+the clean prompt, noisy prompt, gold oracle, and both predictions.
 
 ## Repository Map
 
@@ -129,6 +135,10 @@ src/realistic_bfcl/
 scripts/
   run_stage.py                 Single entry point for research steps.
 Makefile                       Human-facing research commands.
+artifacts/analysis/article/
+  all_bad_examples.csv         Exhaustive clean-correct/noisy-wrong rows.
+  model_comparison.csv         Cross-model clean/noisy comparison.
+  paired_stats.csv             Paired McNemar statistics.
 ```
 
 ## Research Commands
