@@ -182,10 +182,10 @@ Some concrete inspectable failures:
 - **Dropped call**: `parallel_multiple_27` (GLM, `telegraphic_request`). Clean
   prompt asks to transfer `$5000` and calculate interest. The telegraphic prompt
   keeps both tasks, but the model only calls the interest calculator.
-- **Wrong tool**: `live_multiple_718-165-5` (GLM, `telegraphic_request`). Clean
-  prompt asks to book a house in Austin. The telegraphic prompt still asks to
-  book it, but the model calls the house search tool instead of the booking
-  tool.
+- **Wrong tool**: `live_multiple_1025-254-0` (GLM, `telegraphic_request`).
+  Clean prompt asks for the maintenance config for `sandcastle`. The telegraphic
+  prompt still asks for that config, but the model calls the list-all-configs
+  function instead of the lookup for that id.
 - **Wrong date argument across models**: `live_multiple_676-163-1`
   (`telegraphic_request`). Clean prompt asks for New York weather tomorrow and
   states today is `2023.10.1`. The noisy prompt preserves that information, but

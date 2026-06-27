@@ -14,6 +14,12 @@ The research question is whether high clean BFCL scores imply robust real-world
 tool routing. They mostly do for capable models, but not entirely, and the gap
 is invisible to the clean benchmark. This project locates where it opens.
 
+Start here:
+
+- Full research note: [docs/findings.md](docs/findings.md)
+- Article result bundle: [artifacts/analysis/article/](artifacts/analysis/article/)
+- Exhaustive failure table: [artifacts/analysis/article/all_bad_examples.csv](artifacts/analysis/article/all_bad_examples.csv)
+
 ## Minimal Example
 
 Clean BFCL prompt:
@@ -111,6 +117,37 @@ The main failure table is
 `artifacts/analysis/article/all_bad_examples.csv`: every row where the same
 model was correct on the clean prompt and wrong on the augmented prompt, with
 the clean prompt, noisy prompt, gold oracle, and both predictions.
+
+Three inspectable examples from that table:
+
+- **Dropped call**: `parallel_multiple_27` (GLM-4.6, `telegraphic_request`).
+  The clean prompt asks to transfer `$5000` and calculate interest. The terse
+  prompt preserves both tasks, but the model only calls the interest calculator.
+- **Wrong tool**: `live_multiple_1025-254-0` (GLM-4.6, `telegraphic_request`).
+  The prompt asks for the maintenance config for `sandcastle`; the terse prompt
+  routes to the list-all-configs function instead of the lookup for that id.
+- **Wrong date argument across models**: `live_multiple_676-163-1`
+  (`telegraphic_request`). The prompt asks for New York weather tomorrow and
+  states that today is `2023.10.1`; the noisy run fetches `2023-10-01` instead
+  of the gold `2023-10-02`.
+
+## Built On BFCL
+
+This project builds directly on the Berkeley Function Calling Leaderboard
+(BFCL), part of the [Gorilla project](https://github.com/ShishirPatil/gorilla)
+from UC Berkeley. BFCL provides the example pool, tool schemas, and AST-based
+correctness checker that Realistic-BFCL rephrases and reruns.
+
+- BFCL / Gorilla is licensed under Apache-2.0. Any BFCL-derived data, schemas,
+  or checker code used here retain their original Apache-2.0 license and
+  copyright; see the upstream repository for the authoritative terms.
+- The Realistic-BFCL harness in this repository - augmentation, pairing,
+  provider adapters, statistics, and analysis - is original work released under
+  MIT; see [LICENSE](LICENSE).
+- `prepare-subset` expects a checkout of the pinned BFCL upstream. BFCL data is
+  not redistributed here beyond derived artifacts under `artifacts/`.
+
+If you use this work, please also cite BFCL / Gorilla.
 
 ## Repository Map
 
@@ -274,3 +311,8 @@ Because GLM-4.6 is open weights and is served at varying precision across
 providers, treat its absolute clean accuracy as provider-dependent. The paired
 design controls for this: clean and noisy prompts share the same serving route,
 so the degradation comparison is internally valid regardless of precision.
+
+## License
+
+MIT for the Realistic-BFCL harness; see [LICENSE](LICENSE). BFCL-derived
+material remains under Apache-2.0; see attribution above.
