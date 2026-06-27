@@ -42,14 +42,17 @@ call.
 
 ## Headline Results
 
+Drop values are absolute percentage-point drops (`pp`), not relative percent
+change.
+
 | Model | Provider | Tier | Clean acc. | Avg noisy acc. | Avg drop |
 |---|---|---|---:|---:|---:|
-| `gpt-5.4-nano` | OpenAI | cheap | 0.761 | 0.749 | 0.012 |
-| `claude-haiku-4-5-20251001` | Anthropic | mid | 0.832 | 0.827 | 0.005 |
-| `z-ai/glm-4.6` | OpenRouter | strong-open | 0.845 | 0.836 | 0.009 |
+| `gpt-5.4-nano` | OpenAI | cheap | 76.1% | 74.9% | 1.2 pp |
+| `claude-haiku-4-5-20251001` | Anthropic | mid | 83.2% | 82.6% | 0.5 pp |
+| `z-ai/glm-4.6` | OpenRouter | strong-open | 84.5% | 83.6% | 0.9 pp |
 
-Clean accuracy rises across these three models, from `0.761` to `0.832` to
-`0.845`, but aggregate degradation is **not** monotonic: GLM-4.6 has the highest
+Clean accuracy rises across these three models, from `76.1%` to `83.2%` to
+`84.5%`, but aggregate degradation is **not** monotonic: GLM-4.6 has the highest
 clean accuracy yet a larger average drop than Haiku, because it takes bigger
 hits on the two dimensions that survive, telegraphic phrasing and cursing, even
 as it is robust to the rest. We therefore do **not** claim "more capable models
@@ -60,41 +63,41 @@ are uniformly more robust." The robust claim is dimension-specific.
 Sorted by exact p-value. `Sig` means significant under Bonferroni correction
 (`alpha ~= 0.0071`).
 
-### `gpt-5.4-nano` (clean 0.761)
+### `gpt-5.4-nano` (clean 76.1%)
 
-| Dimension | Noisy | Drop | Fail | Fix | McNemar p | Sig |
+| Dimension | Noisy acc. | Drop | Fail | Fix | McNemar p | Sig |
 |---|---:|---:|---:|---:|---:|:--:|
-| `pasted_context_block` | 0.742 | 0.019 | 96 | 51 | 0.00026 | **yes** |
-| `cursing` | 0.744 | 0.017 | 97 | 58 | 0.0022 | **yes** |
-| `telegraphic_request` | 0.746 | 0.014 | 98 | 64 | 0.0093 | no (FDR yes, q=0.022) |
-| `irrelevant_context` | 0.749 | 0.012 | 84 | 56 | 0.0222 | no (FDR yes, q=0.039) |
-| `argumentative_challenge` | 0.751 | 0.010 | 76 | 52 | 0.0416 | no |
-| `removed_spaces` | 0.753 | 0.008 | 76 | 57 | 0.1182 | no |
-| `typos` | 0.758 | 0.003 | 67 | 60 | 0.5946 | no |
+| `pasted_context_block` | 74.2% | 1.9 pp | 96 | 51 | 0.00026 | **yes** |
+| `cursing` | 74.4% | 1.7 pp | 97 | 58 | 0.0022 | **yes** |
+| `telegraphic_request` | 74.6% | 1.4 pp | 98 | 64 | 0.0093 | no (FDR yes, q=0.022) |
+| `irrelevant_context` | 74.9% | 1.2 pp | 84 | 56 | 0.0222 | no (FDR yes, q=0.039) |
+| `argumentative_challenge` | 75.1% | 1.0 pp | 76 | 52 | 0.0416 | no |
+| `removed_spaces` | 75.3% | 0.8 pp | 76 | 57 | 0.1182 | no |
+| `typos` | 75.8% | 0.3 pp | 67 | 60 | 0.5946 | no |
 
-### `claude-haiku-4-5-20251001` (clean 0.832)
+### `claude-haiku-4-5-20251001` (clean 83.2%)
 
-| Dimension | Noisy | Drop | Fail | Fix | McNemar p | Sig |
+| Dimension | Noisy acc. | Drop | Fail | Fix | McNemar p | Sig |
 |---|---:|---:|---:|---:|---:|:--:|
-| `telegraphic_request` | 0.817 | 0.014 | 51 | 17 | 0.000045 | **yes** |
-| `cursing` | 0.824 | 0.008 | 30 | 12 | 0.0079 | no (borderline) |
-| `irrelevant_context` | 0.825 | 0.006 | 29 | 14 | 0.0315 | no |
-| `argumentative_challenge` | 0.827 | 0.005 | 23 | 12 | 0.0895 | no |
-| `removed_spaces` | 0.829 | 0.002 | 13 | 8 | 0.3833 | no |
-| `typos` | 0.830 | 0.001 | 12 | 9 | 0.6636 | no |
-| `pasted_context_block` | 0.831 | 0.001 | 26 | 24 | 0.8877 | no |
+| `telegraphic_request` | 81.7% | 1.4 pp | 51 | 17 | 0.000045 | **yes** |
+| `cursing` | 82.4% | 0.8 pp | 30 | 12 | 0.0079 | no (borderline) |
+| `irrelevant_context` | 82.5% | 0.6 pp | 29 | 14 | 0.0315 | no |
+| `argumentative_challenge` | 82.7% | 0.5 pp | 23 | 12 | 0.0895 | no |
+| `removed_spaces` | 82.9% | 0.2 pp | 13 | 8 | 0.3833 | no |
+| `typos` | 83.0% | 0.1 pp | 12 | 9 | 0.6636 | no |
+| `pasted_context_block` | 83.1% | 0.1 pp | 26 | 24 | 0.8877 | no |
 
-### `z-ai/glm-4.6` (clean 0.845)
+### `z-ai/glm-4.6` (clean 84.5%)
 
-| Dimension | Noisy | Drop | Fail | Fix | McNemar p | Sig |
+| Dimension | Noisy acc. | Drop | Fail | Fix | McNemar p | Sig |
 |---|---:|---:|---:|---:|---:|:--:|
-| `telegraphic_request` | 0.825 | 0.020 | 86 | 38 | 0.000019 | **yes** |
-| `cursing` | 0.831 | 0.014 | 76 | 43 | 0.0032 | **yes** |
-| `argumentative_challenge` | 0.837 | 0.009 | 60 | 40 | 0.0569 | no |
-| `irrelevant_context` | 0.838 | 0.007 | 52 | 36 | 0.1093 | no |
-| `removed_spaces` | 0.839 | 0.006 | 48 | 33 | 0.1193 | no |
-| `typos` | 0.840 | 0.006 | 49 | 36 | 0.1928 | no |
-| `pasted_context_block` | 0.843 | 0.002 | 46 | 42 | 0.7493 | no |
+| `telegraphic_request` | 82.5% | 2.0 pp | 86 | 38 | 0.000019 | **yes** |
+| `cursing` | 83.1% | 1.4 pp | 76 | 43 | 0.0032 | **yes** |
+| `argumentative_challenge` | 83.7% | 0.9 pp | 60 | 40 | 0.0569 | no |
+| `irrelevant_context` | 83.8% | 0.7 pp | 52 | 36 | 0.1093 | no |
+| `removed_spaces` | 83.9% | 0.6 pp | 48 | 33 | 0.1193 | no |
+| `typos` | 84.0% | 0.6 pp | 49 | 36 | 0.1928 | no |
+| `pasted_context_block` | 84.3% | 0.2 pp | 46 | 42 | 0.7493 | no |
 
 ## The Cross-Model Signal
 
@@ -108,7 +111,7 @@ Sorted by exact p-value. `Sig` means significant under Bonferroni correction
   (`p = 0.0079`, just above the corrected threshold). Profanity shifts routing
   even though it carries no task information.
 - **`pasted_context_block`** is the instructive reversal. It is the largest and
-  most significant degradation on the cheap model (`p = 0.00026`, drop 0.019),
+  most significant degradation on the cheap model (`p = 0.00026`, drop 1.9 pp),
   but a near-perfect coin flip on both capable models (Haiku 26 vs. 24,
   `p = 0.89`; GLM 46 vs. 42, `p = 0.75`). It is a cheap-model fragility that
   capability eliminates. It also shows why the paired test matters: a
@@ -159,6 +162,39 @@ tool calls: missing the second item in a multi-call request, changing a required
 argument, or routing to a related but wrong function. Concrete examples are in
 `artifacts/analysis/article/cross_model_failure_examples.csv`.
 
+## Full Failure Table And Examples
+
+The exhaustive file for the article claim is
+`artifacts/analysis/article/all_bad_examples.csv`. It contains every
+clean-correct/noisy-wrong row across the three article-facing model runs, with
+the clean prompt, noisy prompt, gold oracle, clean prediction, and noisy
+prediction.
+
+| Model | Clean-correct/noisy-wrong rows |
+|---|---:|
+| `gpt-5.4-nano` | 621 |
+| `claude-haiku-4-5-20251001` | 184 |
+| `z-ai/glm-4.6` | 417 |
+| **Total** | **1222** |
+
+Some concrete inspectable failures:
+
+- **Dropped call**: `parallel_multiple_27` (GLM, `telegraphic_request`). Clean
+  prompt asks to transfer `$5000` and calculate interest. The telegraphic prompt
+  keeps both tasks, but the model only calls the interest calculator.
+- **Wrong tool**: `live_multiple_718-165-5` (GLM, `telegraphic_request`). Clean
+  prompt asks to book a house in Austin. The telegraphic prompt still asks to
+  book it, but the model calls the house search tool instead of the booking
+  tool.
+- **Wrong date argument across models**: `live_multiple_676-163-1`
+  (`telegraphic_request`). Clean prompt asks for New York weather tomorrow and
+  states today is `2023.10.1`. The noisy prompt preserves that information, but
+  GPT, Haiku, and GLM all produce `2023-10-01` instead of the gold
+  `2023-10-02` in at least one article-facing run.
+- **Profanity flips routing**: `live_multiple_992-223-0` (GLM, `cursing`). Clean
+  prompt asks to delete the Apdex config for `d0404`. The profane rewrite still
+  asks for deletion, but the model calls the list/get configuration tool.
+
 ## Interpretation
 
 1. Clean BFCL accuracy does not certify robustness to realistic phrasing. Even a
@@ -208,6 +244,8 @@ Key artifacts:
 ```text
 artifacts/analysis/article/paired_stats.csv
 artifacts/analysis/article/model_comparison.csv
+artifacts/analysis/article/all_bad_examples.csv
+artifacts/analysis/article/all_bad_examples_summary.csv
 artifacts/analysis/article/significant_cell_review_summary.csv
 artifacts/analysis/article/significant_cell_review.csv
 artifacts/analysis/article/significant_cell_fix_review.csv
