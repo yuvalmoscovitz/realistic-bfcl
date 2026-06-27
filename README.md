@@ -117,7 +117,8 @@ The main failure table is
 `artifacts/analysis/article/clean_to_noisy_failures.csv`: row-level traces where
 the same model was correct on the clean prompt and wrong on the augmented
 prompt, with the clean prompt, noisy prompt, expected BFCL tool calls, both
-model calls, evaluator error, provider response ids, and explicit review status.
+model calls, evaluator error, provider response ids, and explicit manual review
+status and notes.
 Use `paired_stats.csv` and `model_comparison.csv` for headline aggregate counts.
 
 Three inspectable examples from that table:

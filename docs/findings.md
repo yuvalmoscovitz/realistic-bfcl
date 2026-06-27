@@ -171,9 +171,9 @@ The exhaustive file for the article claim is
 `artifacts/analysis/article/clean_to_noisy_failures.csv`. It contains every
 clean-correct/noisy-wrong row across the three article-facing model runs, with
 the clean prompt, noisy prompt, expected BFCL tool calls, clean model calls,
-noisy model calls, evaluator error, provider response ids, and explicit review
-status. Use `paired_stats.csv` and `model_comparison.csv` for headline aggregate
-counts.
+noisy model calls, evaluator error, provider response ids, and explicit manual
+review status and notes. Use `paired_stats.csv` and `model_comparison.csv` for
+headline aggregate counts.
 
 | Model | Clean-correct/noisy-wrong rows |
 |---|---:|
@@ -181,6 +181,15 @@ counts.
 | `claude-haiku-4-5-20251001` | 184 |
 | `z-ai/glm-4.6` | 417 |
 | **Total** | **1222** |
+
+Every row in this table has been reviewed:
+
+| Model | `true_model_failure` | `possible_oracle_artifact` |
+|---|---:|---:|
+| `gpt-5.4-nano` | 331 | 290 |
+| `claude-haiku-4-5-20251001` | 64 | 120 |
+| `z-ai/glm-4.6` | 219 | 198 |
+| **Total** | **614** | **608** |
 
 Some concrete inspectable failures:
 
@@ -240,7 +249,8 @@ Some concrete inspectable failures:
 
 - BFCL substrate and dimensions are pinned in `configs/`.
 - All runs are full-pool and temperature `0`; temperature is recorded in run
-  metadata and cache fingerprints.
+  metadata and cache fingerprints, but not repeated as a column in
+  `clean_to_noisy_failures.csv`.
 - Per-model paired statistics and McNemar outputs are written under
   `artifacts/analysis/article/`.
 

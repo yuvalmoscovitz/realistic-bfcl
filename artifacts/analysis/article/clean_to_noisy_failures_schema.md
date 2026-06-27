@@ -14,16 +14,16 @@ Primary key: `row_id`.
 | `evaluation_run_id` | Human-readable run id for provenance. |
 | `evaluation_run_role` | Whether the run is a primary full-pool trace or a repeat trace. |
 | `pool_size` | Number of base BFCL examples in the run. |
-| `temperature` | Model sampling temperature. |
 | `repeat_index` | Repeat number when the row comes from a repeat run; blank otherwise. |
 | `dimension` | Realism transformation applied to the clean prompt. |
 | `base_id` | BFCL-derived base example id. |
 | `noisy_id` | Augmented example id. Not unique across models. |
 | `category` | BFCL category. |
-| `review_status` | `reviewed` or `not_reviewed`. |
-| `review_scope` | Why the row has or lacks manual screening. |
-| `review_label` | `true_model_failure`, `possible_oracle_artifact`, or `not_reviewed`. |
-| `screened_failure_type` | Failure type assigned by the significant-cell screen, or `not_reviewed`. |
+| `review_status` | Manual review status. |
+| `review_scope` | Review scope for the row. |
+| `review_label` | `true_model_failure` or `possible_oracle_artifact`. |
+| `screened_failure_type` | Failure type assigned during review. |
+| `review_notes` | Short reviewer note explaining the label. |
 | `clean_prompt` | Original clean user prompt. |
 | `noisy_prompt` | Oracle-preserving noisy prompt. |
 | `expected_tool_calls` | BFCL accepted tool-call oracle. |
@@ -38,6 +38,6 @@ Primary key: `row_id`.
 | `clean_provider_response_id` | Provider response id for the clean call. |
 | `noisy_provider_response_id` | Provider response id for the noisy call. |
 
-Review labels in this file are the significant-cell artifact-screen labels, not
-the broader article-inclusion labels from `docs/annotation_protocol.md`. Rows
-outside that screen are explicitly marked `not_reviewed`.
+All rows in this file have been reviewed. Review labels are row-level
+artifact-screen labels, not the broader article-inclusion labels from
+`docs/annotation_protocol.md`.
