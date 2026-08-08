@@ -6,10 +6,7 @@ analysis/*
 !analysis/article/
 !analysis/article/*.csv
 !analysis/article/*.json
-!analysis/article/*diagnostics.md
-!analysis/article/*partial_paired.md
 !analysis/article/README.md
-!analysis/article/unified_report.md
 !frozen/
 frozen/*
 !frozen/rewrite_suitable_500.jsonl

@@ -159,16 +159,21 @@ be read as conservative article-level evidence, not as final benchmark labels.
 
 The remaining failures are not mostly crashes. They are plausible-looking wrong
 tool calls: missing the second item in a multi-call request, changing a required
-argument, or routing to a related but wrong function. Concrete examples are in
-`artifacts/analysis/article/cross_model_failure_examples.csv`.
+argument, or routing to a related but wrong function. The showcase examples
+below are verified `true_model_failure` rows from
+`artifacts/analysis/article/clean_to_noisy_failures.csv`; the smaller
+`cross_model_failure_examples.csv` file also includes artifact-control rows and
+is not the showcase failure list.
 
 ## Full Failure Table And Examples
 
 The exhaustive file for the article claim is
-`artifacts/analysis/article/all_bad_examples.csv`. It contains every
+`artifacts/analysis/article/clean_to_noisy_failures.csv`. It contains every
 clean-correct/noisy-wrong row across the three article-facing model runs, with
-the clean prompt, noisy prompt, gold oracle, clean prediction, and noisy
-prediction.
+the clean prompt, noisy prompt, expected BFCL tool calls, clean model calls,
+noisy model calls, evaluator error, provider response ids, and explicit manual
+review status and notes. Use `paired_stats.csv` and `model_comparison.csv` for
+headline aggregate counts.
 
 | Model | Clean-correct/noisy-wrong rows |
 |---|---:|
@@ -176,6 +181,18 @@ prediction.
 | `claude-haiku-4-5-20251001` | 184 |
 | `z-ai/glm-4.6` | 417 |
 | **Total** | **1222** |
+
+Every row in this table has been reviewed:
+
+Rows initially labeled `possible_oracle_artifact` received a second-pass audit;
+90 were promoted to `true_model_failure` and 1 remains `uncertain`.
+
+| Model | `true_model_failure` | `possible_oracle_artifact` | `uncertain` |
+|---|---:|---:|---:|
+| `gpt-5.4-nano` | 387 | 234 | 0 |
+| `claude-haiku-4-5-20251001` | 80 | 104 | 0 |
+| `z-ai/glm-4.6` | 237 | 179 | 1 |
+| **Total** | **704** | **517** | **1** |
 
 Some concrete inspectable failures:
 
@@ -235,7 +252,8 @@ Some concrete inspectable failures:
 
 - BFCL substrate and dimensions are pinned in `configs/`.
 - All runs are full-pool and temperature `0`; temperature is recorded in run
-  metadata and cache fingerprints.
+  metadata and cache fingerprints, but not repeated as a column in
+  `clean_to_noisy_failures.csv`.
 - Per-model paired statistics and McNemar outputs are written under
   `artifacts/analysis/article/`.
 
@@ -244,8 +262,8 @@ Key artifacts:
 ```text
 artifacts/analysis/article/paired_stats.csv
 artifacts/analysis/article/model_comparison.csv
-artifacts/analysis/article/all_bad_examples.csv
-artifacts/analysis/article/all_bad_examples_summary.csv
+artifacts/analysis/article/clean_to_noisy_failures.csv
+artifacts/analysis/article/clean_to_noisy_failures_summary.csv
 artifacts/analysis/article/significant_cell_review_summary.csv
 artifacts/analysis/article/significant_cell_review.csv
 artifacts/analysis/article/significant_cell_fix_review.csv
