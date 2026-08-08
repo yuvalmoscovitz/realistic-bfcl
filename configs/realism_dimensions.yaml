@@ -1,6 +1,7 @@
 dimensions:
   typos:
-    status: planned
+    status: evaluated
+    article_facing: true
     description: Add one or two small human typos while preserving the request.
     must_preserve:
       - function_name
@@ -17,7 +18,8 @@ dimensions:
       - adds or removes a constraint
 
   cursing:
-    status: planned
+    status: evaluated
+    article_facing: true
     description: Add profanity or frustrated tone around the same request.
     must_preserve:
       - function_name
@@ -34,7 +36,8 @@ dimensions:
       - makes refusal or safety behavior the intended target
 
   irrelevant_context:
-    status: planned
+    status: evaluated
+    article_facing: true
     description: Add unrelated personal or situational context around the request.
     must_preserve:
       - function_name
@@ -51,7 +54,8 @@ dimensions:
       - makes multiple tool calls plausible when the clean oracle has one
 
   removed_spaces:
-    status: planned
+    status: evaluated
+    article_facing: true
     description: Remove one space inside the request, as in casual or mobile typing.
     must_preserve:
       - function_name
@@ -67,7 +71,8 @@ dimensions:
       - makes the requested action ambiguous
 
   argumentative_challenge:
-    status: planned
+    status: evaluated
+    article_facing: true
     description: Add a distrustful or argumentative wrapper before the same request.
     must_preserve:
       - function_name
@@ -85,6 +90,10 @@ dimensions:
 
   profane_sandwich:
     status: pilot
+    article_facing: false
+    article_exclusion_reason: >-
+      Overlaps cursing and lacks a frozen full-pool, cross-model, reviewed
+      article artifact.
     description: Add realistic profanity before and after the exact clean request.
     must_preserve:
       - function_name
@@ -102,6 +111,10 @@ dimensions:
 
   argumentative_sandwich:
     status: pilot
+    article_facing: false
+    article_exclusion_reason: >-
+      Overlaps argumentative_challenge and lacks a frozen full-pool,
+      cross-model, reviewed article artifact.
     description: Add skeptical or argumentative text around the exact clean request.
     must_preserve:
       - function_name
@@ -119,6 +132,10 @@ dimensions:
 
   distractor_sandwich:
     status: pilot
+    article_facing: false
+    article_exclusion_reason: >-
+      Overlaps irrelevant_context and pasted_context_block and lacks a frozen
+      full-pool, cross-model, reviewed article artifact.
     description: Add unrelated stale context before and after the exact clean request.
     must_preserve:
       - function_name
@@ -135,7 +152,8 @@ dimensions:
       - makes multiple tool calls plausible when the clean oracle has one
 
   pasted_context_block:
-    status: pilot
+    status: evaluated
+    article_facing: true
     description: Add messy copied page, log, email, or prior-instruction residue before the exact clean request.
     must_preserve:
       - function_name
@@ -154,7 +172,8 @@ dimensions:
       - changes any oracle-bearing text in the clean request
 
   telegraphic_request:
-    status: pilot
+    status: evaluated
+    article_facing: true
     description: Compress the clean request into casual keyword-style input while preserving oracle-bearing values.
     must_preserve:
       - function_name

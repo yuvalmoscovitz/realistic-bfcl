@@ -45,6 +45,21 @@ reconstructed exactly from the paired contingency counts: `b` values of `+1`,
 change the bootstrap distribution of their mean. The complete generated table
 is `artifacts/analysis/significance.csv`.
 
+### Dimension Scope
+
+Ten deterministic dimensions are implemented, but seven reached this
+article-facing run: `typos`, `cursing`, `irrelevant_context`, `removed_spaces`,
+`argumentative_challenge`, `pasted_context_block`, and `telegraphic_request`.
+The three sandwich variants remained pilots and are excluded from all article
+statistics: `profane_sandwich` overlaps `cursing`, `argumentative_sandwich`
+overlaps `argumentative_challenge`, and `distractor_sandwich` overlaps the two
+context dimensions. In addition to that conceptual overlap, none had the same
+frozen full-pool, cross-model, reviewed artifact required for inclusion. This is
+a methodological scope decision, not evidence that the excluded dimensions
+would or would not produce an effect. The machine-readable status and exclusion
+reason for every implemented dimension live in
+`configs/realism_dimensions.yaml`.
+
 ## Headline Results
 
 Drop values are absolute percentage-point drops (`pp`), not relative percent
