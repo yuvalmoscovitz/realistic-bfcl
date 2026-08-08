@@ -94,6 +94,41 @@ DIMENSION_FILES = {
 }
 
 
+def realism_dimension_configs() -> dict[str, dict[str, object]]:
+    path = REPO_ROOT / "configs/realism_dimensions.yaml"
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not isinstance(payload.get("dimensions"), dict):
+        raise ValueError(f"Invalid realism dimension config: {path}")
+
+    dimensions: dict[str, dict[str, object]] = {}
+    for name, raw_config in payload["dimensions"].items():
+        if not isinstance(name, str) or not isinstance(raw_config, dict):
+            raise ValueError(f"Invalid realism dimension entry in {path}")
+        config = dict(raw_config)
+        status = config.get("status")
+        if status not in {"evaluated", "pilot"}:
+            raise ValueError(f"Dimension {name} has invalid status: {status!r}.")
+        article_facing = config.get("article_facing")
+        if not isinstance(article_facing, bool):
+            raise ValueError(f"Dimension {name} must declare article_facing as a boolean.")
+        if article_facing and status != "evaluated":
+            raise ValueError(f"Article-facing dimension {name} must have evaluated status.")
+        if not article_facing and not str(config.get("article_exclusion_reason", "")).strip():
+            raise ValueError(
+                f"Non-article dimension {name} must declare article_exclusion_reason."
+            )
+        dimensions[name] = config
+    return dimensions
+
+
+def article_facing_dimensions() -> frozenset[str]:
+    return frozenset(
+        name
+        for name, config in realism_dimension_configs().items()
+        if config["article_facing"] is True
+    )
+
+
 @dataclass(frozen=True)
 class ModelRun:
     name: str

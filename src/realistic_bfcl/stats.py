@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .common import REPO_ROOT, write_csv
+from .common import REPO_ROOT, article_facing_dimensions, write_csv
 
 SIGNIFICANCE_FIELDS = [
     "model",
@@ -27,17 +27,7 @@ SIGNIFICANCE_FIELDS = [
     "significant",
 ]
 
-ARTICLE_SIGNIFICANCE_DIMENSIONS = frozenset(
-    {
-        "argumentative_challenge",
-        "cursing",
-        "irrelevant_context",
-        "pasted_context_block",
-        "removed_spaces",
-        "telegraphic_request",
-        "typos",
-    }
-)
+ARTICLE_SIGNIFICANCE_DIMENSIONS = article_facing_dimensions()
 
 
 def exact_mcnemar(b: int, c: int) -> float:

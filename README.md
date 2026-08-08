@@ -217,29 +217,20 @@ REALISTIC_BFCL_SUBSET_CONFIG=configs/subsets/expanded_live.yaml make prepare-sub
 ```
 
 `augment` creates the frozen noisy dataset once. It can generate ten implemented
-oracle-preserving dimensions:
-
-- `typos`
-- `cursing`
-- `irrelevant_context`
-- `removed_spaces`
-- `argumentative_challenge`
-- `profane_sandwich`
-- `argumentative_sandwich`
-- `distractor_sandwich`
-- `pasted_context_block`
-- `telegraphic_request`
-
-The current article-facing analysis uses the seven reviewed dimensions listed in
-[docs/findings.md](docs/findings.md).
+oracle-preserving dimensions. Seven reached the frozen, full-pool,
+article-facing analysis: `typos`, `cursing`, `irrelevant_context`,
+`removed_spaces`, `argumentative_challenge`, `pasted_context_block`, and
+`telegraphic_request`. Three overlapping wrapper pilots did not:
+`profane_sandwich`, `argumentative_sandwich`, and `distractor_sandwich`.
+`configs/realism_dimensions.yaml` is the source of truth for each dimension's
+`status`, `article_facing` flag, and exclusion reason.
 
 It also writes `artifacts/generated/augmentation_review.csv` for human
 inspection. Deterministic invariant checks reject examples that alter numbers,
 quoted strings, or visible gold argument values.
 
-The article-facing run currently uses the seven reviewed dimensions in
-`docs/findings.md`. Treat `cursing` as frustrated user register: profanity is a
-surface marker for impatience, not the scientific claim by itself.
+Treat `cursing` as frustrated user register: profanity is a surface marker for
+impatience, not the scientific claim by itself.
 
 `augment-llm-pilot` creates saved LLM-generated augmentation candidates for
 human review. These candidates are not part of the default article-facing run
