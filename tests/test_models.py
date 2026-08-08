@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from realistic_bfcl import evaluate
-from realistic_bfcl.common import configured_model_runs, model_registry
-from realistic_bfcl.evaluate import estimated_cost_usd
+from realistic_bfcl import analyze, evaluate
+from realistic_bfcl.common import article_primary_model, configured_model_runs, model_registry
+from realistic_bfcl.evaluate import estimated_cost_usd, input_fingerprint
 
 
 def test_model_registry_spans_tiers_and_has_unique_namespaces() -> None:
@@ -43,6 +43,48 @@ def test_estimated_cost_uses_provider_token_names() -> None:
     assert cost == 2.70
 
 
+def test_batch_cost_uses_anthropic_discount(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = configured_model_runs(["haiku"])[0]
+    monkeypatch.setenv("REALISTIC_BFCL_EXECUTION", "batch")
+
+    cost = estimated_cost_usd(
+        model, {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+    )
+
+    assert cost == 3.0
+
+
+def test_openrouter_routing_is_part_of_cache_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = configured_model_runs(["glm"])[0]
+    example = {"question": [], "function": [], "ground_truth": [], "id": "x"}
+    original = input_fingerprint(example, model)
+    monkeypatch.setenv("REALISTIC_BFCL_OPENROUTER_PROVIDER_ONLY", "AnotherProvider")
+
+    assert input_fingerprint(example, model) != original
+
+
+def test_article_primary_exposes_safe_output_namespace() -> None:
+    primary = article_primary_model()
+
+    assert primary.id == "gpt-5.4-nano"
+    assert "/" not in primary.filename
+
+
+def test_analysis_paths_use_safe_primary_namespace(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    primary = configured_model_runs(["glm"])[0]
+    monkeypatch.setattr(analyze, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(analyze, "ARTICLE_PRIMARY_MODEL", primary)
+
+    path = analyze.paired_summary_path("typos", "")
+
+    assert path.name == "z-ai_glm-4.6_summary.json"
+    assert "z-ai/glm-4.6" not in str(path)
+
+
 def test_run_manifest_records_model_cost_and_wall_clock(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -57,6 +99,8 @@ def test_run_manifest_records_model_cost_and_wall_clock(
             models[0].id: {
                 "wall_clock_seconds": 1.25,
                 "usage": {"input_tokens": 1_000_000.0},
+                "api_calls": 1,
+                "cache_hits": 0,
             }
         },
     )
@@ -67,6 +111,8 @@ def test_run_manifest_records_model_cost_and_wall_clock(
             models[0].id: {
                 "wall_clock_seconds": 2.75,
                 "usage": {"output_tokens": 2_000_000.0},
+                "api_calls": 1,
+                "cache_hits": 0,
             }
         },
     )
@@ -79,3 +125,4 @@ def test_run_manifest_records_model_cost_and_wall_clock(
     manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
     assert manifest["models"][0]["estimated_cost_usd"] == 2.70
     assert manifest["models"][0]["wall_clock_seconds"] == 4.0
+    assert manifest["models"][0]["api_calls"] == 2

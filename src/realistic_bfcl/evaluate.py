@@ -930,17 +930,28 @@ def estimated_cost_usd(model: ModelRun, usage: dict[str, float]) -> float | None
         return None
     input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0.0))
     output_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0.0))
+    execution = os.environ.get("REALISTIC_BFCL_EXECUTION", "").strip().lower()
+    batch_multiplier = (
+        0.5
+        if execution in {"batch", "anthropic_batch"}
+        and model.provider in {"anthropic", "claude"}
+        else 1.0
+    )
     return round(
         (
             input_tokens * model.input_cost_per_million_tokens
             + output_tokens * model.output_cost_per_million_tokens
         )
-        / 1_000_000,
+        / 1_000_000
+        * batch_multiplier,
         6,
     )
 
 
 def input_fingerprint(example: dict[str, object], model: ModelRun) -> str:
+    provider_routing = (
+        openrouter_provider_routing(model) if model.provider == "openrouter" else None
+    )
     return stable_hash(
         {
             "model": model.id,
@@ -955,6 +966,7 @@ def input_fingerprint(example: dict[str, object], model: ModelRun) -> str:
                 "tool_choice": ROUTER_TOOL_CHOICE,
                 "max_output_tokens": model.max_output_tokens,
                 "message_serialization": ROUTER_MESSAGE_SERIALIZATION,
+                "provider_routing": provider_routing,
             },
         }
     )
@@ -985,7 +997,7 @@ def category_metrics(
 
 def run_or_load_model_predictions(
     examples: list[dict[str, object]], model_predictions_path: Path, model: ModelRun
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], dict[str, object]]:
     expected_fingerprints = {
         example["id"]: input_fingerprint(example, model) for example in examples
     }
@@ -1006,6 +1018,7 @@ def run_or_load_model_predictions(
         cached_predictions = {}
 
     missing_examples = [example for example in examples if example["id"] not in cached_predictions]
+    requested_ids = {example["id"] for example in missing_examples}
     if missing_examples:
         if use_batch_backend(model):
             print(
@@ -1057,7 +1070,14 @@ def run_or_load_model_predictions(
         rescored_prediction["input_fingerprint"] = expected_fingerprints[prediction["id"]]
         rescored_predictions.append(rescored_prediction)
     write_jsonl(model_predictions_path, rescored_predictions)
-    return rescored_predictions
+    requested_predictions = [
+        prediction for prediction in rescored_predictions if prediction["id"] in requested_ids
+    ]
+    return rescored_predictions, {
+        "api_calls": len(requested_predictions),
+        "cache_hits": len(examples) - len(requested_predictions),
+        "usage": aggregate_usage(requested_predictions),
+    }
 
 
 def result_suffix() -> str:
@@ -1257,7 +1277,7 @@ def clean_baseline(models: list[ModelRun]) -> dict[str, dict[str, object]]:
     for model in models:
         model_started = time.perf_counter()
         model_predictions_path = clean_results_dir / f"{model.filename}_predictions.jsonl"
-        model_predictions = run_or_load_model_predictions(
+        model_predictions, invocation = run_or_load_model_predictions(
             examples, model_predictions_path, model
         )
         metrics = accuracy_metrics(model_predictions)
@@ -1269,7 +1289,7 @@ def clean_baseline(models: list[ModelRun]) -> dict[str, dict[str, object]]:
         ).as_posix()
         model_run_metrics[model.id] = {
             "wall_clock_seconds": round(time.perf_counter() - model_started, 3),
-            "usage": metrics["usage"],
+            **invocation,
         }
 
     write_json(
@@ -1397,7 +1417,7 @@ def paired_eval_dimension(dimension: str, model: ModelRun) -> dict[str, object]:
         {str(noisy_example["base_id"]) for noisy_example in noisy_examples},
         model,
     )
-    noisy_predictions = run_or_load_model_predictions(
+    noisy_predictions, invocation = run_or_load_model_predictions(
         noisy_examples, noisy_predictions_path, model
     )
     noisy_predictions_by_id = {prediction["id"]: prediction for prediction in noisy_predictions}
@@ -1447,6 +1467,7 @@ def paired_eval_dimension(dimension: str, model: ModelRun) -> dict[str, object]:
         "dimension": dimension,
         "summary": summary_path.relative_to(REPO_ROOT).as_posix(),
         "metrics": metrics,
+        "invocation": invocation,
     }
 
 
@@ -1464,15 +1485,20 @@ def paired_eval(models: list[ModelRun]) -> dict[str, dict[str, object]]:
         model_summaries = [paired_eval_dimension(dimension, model) for dimension in dimensions]
         summaries.extend(model_summaries)
         model_usage: dict[str, float] = {}
+        api_calls = 0
+        cache_hits = 0
         for summary in model_summaries:
-            summary_path = REPO_ROOT / str(summary["summary"])
-            payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            usage = payload.get("noisy_metrics", {}).get("usage", {})
+            invocation = summary["invocation"]
+            usage = invocation["usage"]
             if isinstance(usage, dict):
                 model_usage = merge_usage(model_usage, usage)
+            api_calls += int(invocation["api_calls"])
+            cache_hits += int(invocation["cache_hits"])
         model_run_metrics[model.id] = {
             "wall_clock_seconds": round(time.perf_counter() - model_started, 3),
             "usage": model_usage,
+            "api_calls": api_calls,
+            "cache_hits": cache_hits,
         }
     write_json(
         REPO_ROOT / f"artifacts/results/paired/{summary_name}",
@@ -1518,11 +1544,19 @@ def run_bfcl(selected_models: list[str] | None = None) -> None:
                 "tier": model.tier,
                 "sampling": model.sampling_parameters,
                 "usage": usage,
+                "api_calls": int(clean["api_calls"]) + int(noisy["api_calls"]),
+                "cache_hits": int(clean["cache_hits"]) + int(noisy["cache_hits"]),
                 "estimated_cost_usd": estimated_cost_usd(model, usage),
                 "cost_basis": (
                     "provider_reported"
                     if usage.get("cost", 0.0) > 0
-                    else "configured_standard_token_rates"
+                    else (
+                        "configured_batch_token_rates"
+                        if os.environ.get("REALISTIC_BFCL_EXECUTION", "").strip().lower()
+                        in {"batch", "anthropic_batch"}
+                        and model.provider in {"anthropic", "claude"}
+                        else "configured_standard_token_rates"
+                    )
                 ),
                 "pricing_source": model.pricing_source,
                 "wall_clock_seconds": round(
