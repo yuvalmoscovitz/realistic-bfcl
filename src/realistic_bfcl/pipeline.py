@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
 
 from .analyze import analyze
 from .augment import augment
+from .common import set_explicit_env_file
 from .evaluate import freeze_bfcl, run_bfcl
 from .llm_augment import augment_llm_pilot
 from .rewrite_subset import build_rewrite_subset
@@ -170,7 +172,12 @@ def describe_stage(stage: Stage) -> None:
     print(f"Next action: {stage.next_action}")
 
 
-def run_stage(stage: Stage, dry_run: bool, models: list[str] | None = None) -> None:
+def run_stage(
+    stage: Stage,
+    dry_run: bool,
+    models: list[str] | None = None,
+    env_file: Path | None = None,
+) -> None:
     describe_stage(stage)
     if dry_run:
         return
@@ -187,7 +194,11 @@ def run_stage(stage: Stage, dry_run: bool, models: list[str] | None = None) -> N
         build_rewrite_subset()
         return
     if stage.name == "run-bfcl":
-        run_bfcl(models)
+        set_explicit_env_file(env_file)
+        try:
+            run_bfcl(models)
+        finally:
+            set_explicit_env_file(None)
         return
     if stage.name == "analyze":
         analyze()
@@ -211,6 +222,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Only valid for run-bfcl."
         ),
     )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        help="Environment file used before REALISTIC_BFCL_ENV_FILE and process variables.",
+    )
     return parser
 
 
@@ -232,7 +248,15 @@ def main(argv: list[str] | None = None) -> None:
         if not selected_models:
             parser.error("--models must contain at least one model name or id")
 
-    run_stage(stage_by_name(args.stage), dry_run=args.dry_run, models=selected_models)
+    if args.env_file and args.stage != "run-bfcl":
+        parser.error("--env-file is only valid for the run-bfcl stage")
+
+    run_stage(
+        stage_by_name(args.stage),
+        dry_run=args.dry_run,
+        models=selected_models,
+        env_file=args.env_file,
+    )
 
 
 if __name__ == "__main__":

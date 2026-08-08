@@ -8,7 +8,6 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from pathlib import Path
 
 from .augment import (
     literal_visible_in_text,
@@ -21,10 +20,10 @@ from .common import (
     REPO_ROOT,
     article_primary_model,
     conversation_text,
+    grok_api_key,
     openai_api_key,
     openai_concurrency,
     optional_positive_int_env,
-    read_env_file,
     read_jsonl,
     write_jsonl,
 )
@@ -301,33 +300,6 @@ def llm_augment_model() -> str:
 
 def llm_augment_provider() -> str:
     return os.environ.get("REALISTIC_BFCL_LLM_PROVIDER", "openai").strip().lower()
-
-
-def grok_api_key() -> str:
-    if os.environ.get("GROK_API_KEY"):
-        return os.environ["GROK_API_KEY"]
-    if os.environ.get("XAI_API_KEY"):
-        return os.environ["XAI_API_KEY"]
-
-    candidates = [
-        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
-        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
-        else None,
-        REPO_ROOT / ".env",
-        REPO_ROOT.parent / "underlayer/.env",
-    ]
-    for path in candidates:
-        if path is None:
-            continue
-        values = read_env_file(path)
-        key = values.get("GROK_API_KEY") or values.get("XAI_API_KEY")
-        if key:
-            return key
-
-    raise SystemExit(
-        "Missing GROK_API_KEY or XAI_API_KEY. Set it in the environment or "
-        "REALISTIC_BFCL_ENV_FILE."
-    )
 
 
 def output_text(response: dict[str, object]) -> str:
