@@ -169,7 +169,7 @@ def describe_stage(stage: Stage) -> None:
     print(f"Next action: {stage.next_action}")
 
 
-def run_stage(stage: Stage, dry_run: bool) -> None:
+def run_stage(stage: Stage, dry_run: bool, models: list[str] | None = None) -> None:
     describe_stage(stage)
     if dry_run:
         return
@@ -186,7 +186,7 @@ def run_stage(stage: Stage, dry_run: bool) -> None:
         build_rewrite_subset()
         return
     if stage.name == "run-bfcl":
-        run_bfcl()
+        run_bfcl(models)
         return
     if stage.name == "analyze":
         analyze()
@@ -203,6 +203,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Describe the step without running it.",
     )
+    parser.add_argument(
+        "--models",
+        help=(
+            "Comma-separated model names or ids from configs/models.yaml. "
+            "Only valid for run-bfcl."
+        ),
+    )
     return parser
 
 
@@ -216,7 +223,15 @@ def main(argv: list[str] | None = None) -> None:
     if not args.stage:
         parser.error("provide a step name or --list")
 
-    run_stage(stage_by_name(args.stage), dry_run=args.dry_run)
+    selected_models = None
+    if args.models:
+        if args.stage != "run-bfcl":
+            parser.error("--models is only valid for the run-bfcl stage")
+        selected_models = [item.strip() for item in args.models.split(",") if item.strip()]
+        if not selected_models:
+            parser.error("--models must contain at least one model name or id")
+
+    run_stage(stage_by_name(args.stage), dry_run=args.dry_run, models=selected_models)
 
 
 if __name__ == "__main__":

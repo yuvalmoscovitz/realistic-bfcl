@@ -9,8 +9,8 @@ from collections import defaultdict
 
 from .common import (
     DIMENSION_FILES,
-    OPENAI_MODEL,
     REPO_ROOT,
+    article_primary_model,
     compact_text,
     configured_model_runs,
     conversation_text,
@@ -21,6 +21,8 @@ from .common import (
     write_jsonl,
 )
 from .evaluate import generated_dimensions
+
+ARTICLE_PRIMARY_MODEL = article_primary_model()
 
 ARTICLE_DIMENSIONS = {
     "typos",
@@ -444,7 +446,9 @@ def analysis_review_row(
 
 
 def analyze_dimension(dimension: str) -> dict[str, object]:
-    paired_path = REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
+    paired_path = REPO_ROOT / (
+        f"artifacts/results/paired/{dimension}/{ARTICLE_PRIMARY_MODEL.filename}_paired.jsonl"
+    )
     clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
     summary_path = REPO_ROOT / f"artifacts/analysis/{dimension}/summary.json"
@@ -519,7 +523,7 @@ def analyze_dimension(dimension: str) -> dict[str, object]:
         {
             "created_at": utc_now(),
             "stage": "analyze",
-            "model": OPENAI_MODEL,
+            "model": ARTICLE_PRIMARY_MODEL.id,
             "dimension": dimension,
             "total": len(paired_rows),
             "regressions": {
@@ -553,7 +557,9 @@ def analyze_dimension(dimension: str) -> dict[str, object]:
 
 
 def flip_review_rows(dimension: str) -> list[dict[str, object]]:
-    paired_path = REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
+    paired_path = REPO_ROOT / (
+        f"artifacts/results/paired/{dimension}/{ARTICLE_PRIMARY_MODEL.filename}_paired.jsonl"
+    )
     clean_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
 
@@ -776,7 +782,11 @@ def benchmark_summary_rows(
     rows = []
     for dimension in dimensions:
         summary_path = (
-            REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_summary.json"
+            REPO_ROOT
+            / (
+                f"artifacts/results/paired/{dimension}/"
+                f"{ARTICLE_PRIMARY_MODEL.filename}_summary.json"
+            )
         )
         paired_summary = json.loads(summary_path.read_text(encoding="utf-8"))
         metrics = paired_summary["metrics"]
@@ -805,7 +815,7 @@ def benchmark_summary_rows(
         clean_correct = int(metrics["clean_correct"])
         rows.append(
             {
-                "model": OPENAI_MODEL,
+                "model": ARTICLE_PRIMARY_MODEL.id,
                 "dimension": dimension,
                 "total": metrics["total"],
                 "clean_accuracy": metrics["clean_accuracy"],
@@ -940,14 +950,18 @@ def paired_stats_rows(dimensions: list[str]) -> list[dict[str, object]]:
     rows = []
     for dimension in dimensions:
         summary_path = (
-            REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_summary.json"
+            REPO_ROOT
+            / (
+                f"artifacts/results/paired/{dimension}/"
+                f"{ARTICLE_PRIMARY_MODEL.filename}_summary.json"
+            )
         )
         metrics = json.loads(summary_path.read_text(encoding="utf-8"))["metrics"]
         clean_success_noisy_failure = int(metrics["clean_success_noisy_failure"])
         clean_failure_noisy_success = int(metrics["clean_failure_noisy_success"])
         rows.append(
             {
-                "model": OPENAI_MODEL,
+                "model": ARTICLE_PRIMARY_MODEL.id,
                 "dimension": dimension,
                 "total": metrics["total"],
                 "both_correct": metrics["both_correct"],
@@ -994,7 +1008,7 @@ def paired_summary_path(dimension: str, suffix: str) -> object:
     result_dir = REPO_ROOT / f"artifacts/results/paired/{dimension}"
     if suffix:
         result_dir = result_dir / suffix
-    return result_dir / f"{OPENAI_MODEL}_summary.json"
+    return result_dir / f"{ARTICLE_PRIMARY_MODEL.filename}_summary.json"
 
 
 def complete_repeat_runs(dimensions: list[str]) -> list[tuple[str, str]]:
@@ -1007,7 +1021,7 @@ def complete_repeat_runs(dimensions: list[str]) -> list[tuple[str, str]]:
         if not path.is_dir():
             continue
         suffix = path.name
-        if not (path / f"{OPENAI_MODEL}_predictions.jsonl").exists():
+        if not (path / f"{ARTICLE_PRIMARY_MODEL.filename}_predictions.jsonl").exists():
             continue
         if all(paired_summary_path(dimension, suffix).exists() for dimension in dimensions):
             runs.append((suffix, suffix))
@@ -1436,7 +1450,7 @@ def write_article_bundle(
         write_json(
             article_dir / "stability_repeat_summary.json",
             {
-                "model": OPENAI_MODEL,
+                "model": ARTICLE_PRIMARY_MODEL.id,
                 "runs": sorted({str(row["run"]) for row in stability_run_rows}),
                 "dimensions": stability_summary_rows,
             },
@@ -1646,7 +1660,11 @@ def analyze() -> None:
         dimension
         for dimension in generated_dimensions()
         if (
-            REPO_ROOT / f"artifacts/results/paired/{dimension}/{OPENAI_MODEL}_paired.jsonl"
+            REPO_ROOT
+            / (
+                f"artifacts/results/paired/{dimension}/"
+                f"{ARTICLE_PRIMARY_MODEL.filename}_paired.jsonl"
+            )
         ).exists()
     ]
     if not dimensions:
@@ -1808,7 +1826,7 @@ def analyze() -> None:
         {
             "created_at": utc_now(),
             "stage": "analyze",
-            "model": OPENAI_MODEL,
+            "model": ARTICLE_PRIMARY_MODEL.id,
             "adjusted_metric_rule": (
                 "adjusted_regression_count excludes only rows with " "oracle_issue=possible"
             ),
@@ -1824,7 +1842,7 @@ def analyze() -> None:
         {
             "created_at": utc_now(),
             "stage": "analyze",
-            "model": OPENAI_MODEL,
+            "model": ARTICLE_PRIMARY_MODEL.id,
             "dimensions": summaries,
             "benchmark_summary_csv": benchmark_summary_csv_path.relative_to(REPO_ROOT).as_posix(),
             "benchmark_summary_json": benchmark_summary_json_path.relative_to(REPO_ROOT).as_posix(),

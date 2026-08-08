@@ -9,10 +9,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BFCL_COMMIT = "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
 BFCL_REPOSITORY = "https://github.com/ShishirPatil/gorilla"
-OPENAI_MODEL = "gpt-5.4-nano"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MESSAGE_BATCHES_URL = "https://api.anthropic.com/v1/messages/batches"
@@ -26,17 +27,6 @@ ROUTER_SYSTEM_INSTRUCTION = (
 )
 ROUTER_TOOL_CHOICE = "required"
 DEFAULT_ROUTER_MAX_OUTPUT_TOKENS = 256
-try:
-    ROUTER_MAX_OUTPUT_TOKENS = int(
-        os.environ.get(
-            "REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS",
-            str(DEFAULT_ROUTER_MAX_OUTPUT_TOKENS),
-        )
-    )
-except ValueError as error:
-    raise SystemExit("REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS must be an integer.") from error
-if ROUTER_MAX_OUTPUT_TOKENS < 1:
-    raise SystemExit("REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS must be >= 1.")
 ROUTER_MESSAGE_SERIALIZATION = "preserve_bfcl_turns_v1"
 RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
 BFCL_CATEGORY_FILES = {
@@ -106,14 +96,28 @@ DIMENSION_FILES = {
 
 @dataclass(frozen=True)
 class ModelRun:
+    name: str
     id: str
     provider: str
     tier: str
     temperature: float
+    max_output_tokens: int
+    input_cost_per_million_tokens: float | None = None
+    output_cost_per_million_tokens: float | None = None
+    pricing_source: str = ""
+    provider_options: dict[str, object] | None = None
+    article_primary: bool = False
 
     @property
     def filename(self) -> str:
         return safe_model_filename(self.id)
+
+    @property
+    def sampling_parameters(self) -> dict[str, object]:
+        return {
+            "temperature": self.temperature,
+            "max_output_tokens": self.max_output_tokens,
+        }
 
 
 def file_sha256(path: Path) -> str:
@@ -157,102 +161,105 @@ def read_list_setting(path: Path, key: str) -> list[str]:
     return values
 
 
-def read_float_setting(path: Path, key: str, default: float) -> float:
-    prefix = f"{key}:"
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip().startswith(prefix):
-            return float(line.split(":", 1)[1].strip())
-    return default
-
-
-def read_model_setting(path: Path) -> list[dict[str, str]]:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    models: list[dict[str, str]] = []
-    in_models = False
-    current: dict[str, str] | None = None
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped == "models:":
-            in_models = True
-            current = None
-            continue
-        if not in_models:
-            continue
-        if stripped and not line.startswith(" ") and not stripped.startswith("- "):
-            break
-        if stripped.startswith("- "):
-            if current:
-                models.append(current)
-            current = {}
-            item = stripped[2:].strip()
-            if item:
-                if ":" in item:
-                    key, value = item.split(":", 1)
-                    current[key.strip()] = value.strip()
-                else:
-                    current["id"] = item
-            continue
-        if current is not None and ":" in stripped:
-            key, value = stripped.split(":", 1)
-            current[key.strip()] = value.strip()
-
-    if current:
-        models.append(current)
-    return models
-
-
 def safe_model_filename(model_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", model_id).strip("_")
 
 
-def configured_model_runs() -> list[ModelRun]:
-    override = os.environ.get("REALISTIC_BFCL_MODELS")
-    temperature = evaluation_temperature()
-    if override:
-        return [
-            parse_model_override(item, temperature)
-            for item in override.split(",")
-            if item.strip()
-        ]
-
-    config_path = REPO_ROOT / "configs/project.yaml"
-    rows = read_model_setting(config_path)
-    if not rows:
-        rows = [{"id": OPENAI_MODEL, "provider": "openai", "tier": "small"}]
-    return [
-        ModelRun(
-            id=str(row.get("id", "")).strip(),
-            provider=str(row.get("provider", "openai")).strip().lower(),
-            tier=str(row.get("tier", "")).strip(),
-            temperature=temperature,
-        )
-        for row in rows
-        if str(row.get("id", "")).strip()
-    ]
+def _optional_float(value: object, field: str, model_name: str) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError) as error:
+        raise SystemExit(f"Model '{model_name}' has invalid {field}: {value!r}.") from error
 
 
-def parse_model_override(value: str, temperature: float) -> ModelRun:
-    parts = [part.strip() for part in value.strip().split(":")]
-    if len(parts) == 1:
-        return ModelRun(id=parts[0], provider="openai", tier="", temperature=temperature)
-    if len(parts) == 2:
-        provider, model_id = parts
-        return ModelRun(id=model_id, provider=provider.lower(), tier="", temperature=temperature)
-    if len(parts) == 3:
-        provider, model_id, tier = parts
-        return ModelRun(id=model_id, provider=provider.lower(), tier=tier, temperature=temperature)
-    raise SystemExit(
-        "REALISTIC_BFCL_MODELS entries must be model_id, provider:model_id, "
-        "or provider:model_id:tier."
+def _model_from_config(row: object) -> ModelRun:
+    if not isinstance(row, dict):
+        raise SystemExit("Each configs/models.yaml entry must be a mapping.")
+    model_id = str(row.get("id", "")).strip()
+    name = str(row.get("name", "")).strip()
+    provider = str(row.get("provider", "")).strip().lower()
+    if not name or not model_id or not provider:
+        raise SystemExit("Each model requires non-empty name, id, and provider fields.")
+    sampling = row.get("sampling", {})
+    pricing = row.get("pricing_usd_per_million_tokens", {})
+    provider_options = row.get("provider_options", {})
+    if not isinstance(sampling, dict) or not isinstance(pricing, dict):
+        raise SystemExit(f"Model '{name}' sampling and pricing fields must be mappings.")
+    if not isinstance(provider_options, dict):
+        raise SystemExit(f"Model '{name}' provider_options must be a mapping.")
+    try:
+        temperature = float(sampling.get("temperature", 0))
+        max_output_tokens = int(sampling.get("max_output_tokens", DEFAULT_ROUTER_MAX_OUTPUT_TOKENS))
+    except (TypeError, ValueError) as error:
+        raise SystemExit(f"Model '{name}' has invalid sampling parameters.") from error
+    if max_output_tokens < 1:
+        raise SystemExit(f"Model '{name}' max_output_tokens must be >= 1.")
+    return ModelRun(
+        name=name,
+        id=model_id,
+        provider=provider,
+        tier=str(row.get("tier", "")).strip(),
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        input_cost_per_million_tokens=_optional_float(pricing.get("input"), "input price", name),
+        output_cost_per_million_tokens=_optional_float(
+            pricing.get("output"), "output price", name
+        ),
+        pricing_source=str(row.get("pricing_source", "")).strip(),
+        provider_options=dict(provider_options),
+        article_primary=row.get("article_primary") is True,
     )
 
 
-def evaluation_temperature() -> float:
-    value = os.environ.get("REALISTIC_BFCL_TEMPERATURE")
-    if value:
-        return float(value)
-    return read_float_setting(REPO_ROOT / "configs/project.yaml", "temperature", 0.0)
+def model_registry(path: Path | None = None) -> list[ModelRun]:
+    config_path = path or REPO_ROOT / "configs/models.yaml"
+    try:
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise SystemExit(f"Could not read model registry {config_path}: {error}") from error
+    rows = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows:
+        raise SystemExit("configs/models.yaml must contain a non-empty 'models' list.")
+    models = [_model_from_config(row) for row in rows]
+    for label, values in (
+        ("name", [model.name for model in models]),
+        ("id", [model.id for model in models]),
+        ("output namespace", [model.filename for model in models]),
+    ):
+        duplicates = sorted({value for value in values if values.count(value) > 1})
+        if duplicates:
+            raise SystemExit(f"Duplicate model {label}(s) in configs/models.yaml: {duplicates}")
+    primary_models = [model for model in models if model.article_primary]
+    if len(primary_models) != 1:
+        raise SystemExit("configs/models.yaml must mark exactly one article_primary model.")
+    return models
+
+
+def article_primary_model() -> ModelRun:
+    return next(model for model in model_registry() if model.article_primary)
+
+
+def configured_model_runs(selected: list[str] | None = None) -> list[ModelRun]:
+    override = os.environ.get("REALISTIC_BFCL_MODELS")
+    if override:
+        if selected:
+            raise SystemExit("Use either --models or REALISTIC_BFCL_MODELS, not both.")
+        selected = [item.strip() for item in override.split(",") if item.strip()]
+
+    models = model_registry()
+    if not selected:
+        return models
+    by_selector = {selector: model for model in models for selector in (model.name, model.id)}
+    unknown = [selector for selector in selected if selector not in by_selector]
+    if unknown:
+        known = ", ".join(model.name for model in models)
+        raise SystemExit(f"Unknown model selector(s) {unknown}. Known model names: {known}.")
+    chosen = [by_selector[selector] for selector in selected]
+    if len({model.id for model in chosen}) != len(chosen):
+        raise SystemExit("--models selects the same model more than once.")
+    return chosen
 
 
 def reject_placeholders(paths: tuple[Path, ...]) -> None:

@@ -26,7 +26,6 @@ from .common import (
     OPENROUTER_CHAT_COMPLETIONS_URL,
     REPO_ROOT,
     RETRYABLE_HTTP_STATUS,
-    ROUTER_MAX_OUTPUT_TOKENS,
     ROUTER_MESSAGE_SERIALIZATION,
     ROUTER_SYSTEM_INSTRUCTION,
     ROUTER_TOOL_CHOICE,
@@ -491,7 +490,7 @@ def call_openai_tool_router(example: dict[str, object], model: ModelRun) -> dict
         ],
         "tools": tools,
         "tool_choice": ROUTER_TOOL_CHOICE,
-        "max_output_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+        "max_output_tokens": model.max_output_tokens,
         "temperature": model.temperature,
     }
     return openai_retry_json(payload, openai_api_key())
@@ -518,16 +517,17 @@ def call_xai_tool_router(example: dict[str, object], model: ModelRun) -> dict[st
         "tools": tools,
         "tool_choice": "required",
         "temperature": model.temperature,
-        "max_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+        "max_tokens": model.max_output_tokens,
     }
     return xai_retry_json(payload, xai_api_key())
 
 
-def openrouter_provider_routing() -> dict[str, object]:
+def openrouter_provider_routing(model: ModelRun) -> dict[str, object]:
     routing: dict[str, object] = {
         "require_parameters": True,
         "allow_fallbacks": False,
     }
+    routing.update(model.provider_options or {})
     order = os.environ.get("REALISTIC_BFCL_OPENROUTER_PROVIDER_ORDER", "").strip()
     if order:
         routing["order"] = [item.strip() for item in order.split(",") if item.strip()]
@@ -561,8 +561,8 @@ def call_openrouter_tool_router(example: dict[str, object], model: ModelRun) -> 
         "tools": tools,
         "tool_choice": "required",
         "temperature": model.temperature,
-        "max_tokens": ROUTER_MAX_OUTPUT_TOKENS,
-        "provider": openrouter_provider_routing(),
+        "max_tokens": model.max_output_tokens,
+        "provider": openrouter_provider_routing(model),
     }
     return openrouter_retry_json(payload, openrouter_api_key())
 
@@ -583,7 +583,7 @@ def anthropic_messages_payload(
         "tools": tools,
         "tool_choice": {"type": "any"},
         "temperature": model.temperature,
-        "max_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+        "max_tokens": model.max_output_tokens,
     }
     return payload
 
@@ -742,6 +742,8 @@ def run_or_load_anthropic_batch_predictions(
                 "eval_result": eval_result,
                 "response_id": response.get("id"),
                 "usage": response.get("usage"),
+                "execution": "anthropic_batch",
+                "api_attempts": 1,
                 "input_fingerprint": expected_fingerprints[example_id],
             }
         )
@@ -752,6 +754,8 @@ def run_or_load_anthropic_batch_predictions(
 
     for example_id in failed_example_ids:
         prediction = run_model_prediction(examples_by_id[example_id], model)
+        prediction["execution"] = "synchronous_retry"
+        prediction["api_attempts"] = 2
         prediction["input_fingerprint"] = expected_fingerprints[example_id]
         cached_predictions[example_id] = prediction
         append_jsonl(model_predictions_path, prediction)
@@ -900,32 +904,104 @@ def bfcl_ast_result(
     )
 
 
-def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, int]:
-    totals: dict[str, int] = {}
+def aggregate_usage(predictions: list[dict[str, object]]) -> dict[str, float]:
+    totals: dict[str, float] = {}
     for prediction in predictions:
         usage = prediction.get("usage")
         if not isinstance(usage, dict):
             continue
         for key, value in usage.items():
-            if isinstance(value, int):
-                totals[key] = totals.get(key, 0) + value
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                totals[key] = totals.get(key, 0.0) + float(value)
     return totals
 
 
+def merge_usage(*usage_rows: dict[str, float]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for usage in usage_rows:
+        for key, value in usage.items():
+            totals[key] = totals.get(key, 0.0) + value
+    return totals
+
+
+def aggregate_usage_by_execution(
+    predictions: list[dict[str, object]],
+) -> dict[str, dict[str, float]]:
+    by_execution: dict[str, list[dict[str, object]]] = {}
+    for prediction in predictions:
+        execution = str(prediction.get("execution", "synchronous"))
+        by_execution.setdefault(execution, []).append(prediction)
+    return {
+        execution: aggregate_usage(execution_predictions)
+        for execution, execution_predictions in by_execution.items()
+    }
+
+
+def merge_usage_by_execution(
+    *usage_rows: dict[str, dict[str, float]],
+) -> dict[str, dict[str, float]]:
+    totals: dict[str, dict[str, float]] = {}
+    for usage_by_execution in usage_rows:
+        for execution, usage in usage_by_execution.items():
+            totals[execution] = merge_usage(totals.get(execution, {}), usage)
+    return totals
+
+
+def estimated_cost_usd(
+    model: ModelRun, usage: dict[str, float], execution: str = "synchronous"
+) -> float | None:
+    if usage.get("cost", 0.0) > 0:
+        return round(usage["cost"], 6)
+    if (
+        model.input_cost_per_million_tokens is None
+        or model.output_cost_per_million_tokens is None
+    ):
+        return None
+    input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0.0))
+    output_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0.0))
+    batch_multiplier = 0.5 if execution == "anthropic_batch" else 1.0
+    return round(
+        (
+            input_tokens * model.input_cost_per_million_tokens
+            + output_tokens * model.output_cost_per_million_tokens
+        )
+        / 1_000_000
+        * batch_multiplier,
+        6,
+    )
+
+
+def estimated_invocation_cost_usd(
+    model: ModelRun, usage_by_execution: dict[str, dict[str, float]]
+) -> float | None:
+    costs = [
+        estimated_cost_usd(model, usage, execution)
+        for execution, usage in usage_by_execution.items()
+    ]
+    if any(cost is None for cost in costs):
+        return None
+    return round(sum(float(cost) for cost in costs), 6)
+
+
 def input_fingerprint(example: dict[str, object], model: ModelRun) -> str:
+    provider_routing = (
+        openrouter_provider_routing(model) if model.provider == "openrouter" else None
+    )
     return stable_hash(
         {
             "model": model.id,
             "provider": model.provider,
             "temperature": model.temperature,
+            "sampling": model.sampling_parameters,
             "question": example["question"],
             "function": example["function"],
             "ground_truth": example["ground_truth"],
             "router": {
                 "system": ROUTER_SYSTEM_INSTRUCTION,
                 "tool_choice": ROUTER_TOOL_CHOICE,
-                "max_output_tokens": ROUTER_MAX_OUTPUT_TOKENS,
+                "max_output_tokens": model.max_output_tokens,
                 "message_serialization": ROUTER_MESSAGE_SERIALIZATION,
+                "provider_routing": provider_routing,
             },
         }
     )
@@ -956,7 +1032,7 @@ def category_metrics(
 
 def run_or_load_model_predictions(
     examples: list[dict[str, object]], model_predictions_path: Path, model: ModelRun
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], dict[str, object]]:
     expected_fingerprints = {
         example["id"]: input_fingerprint(example, model) for example in examples
     }
@@ -977,6 +1053,7 @@ def run_or_load_model_predictions(
         cached_predictions = {}
 
     missing_examples = [example for example in examples if example["id"] not in cached_predictions]
+    requested_ids = {example["id"] for example in missing_examples}
     if missing_examples:
         if use_batch_backend(model):
             print(
@@ -1028,7 +1105,18 @@ def run_or_load_model_predictions(
         rescored_prediction["input_fingerprint"] = expected_fingerprints[prediction["id"]]
         rescored_predictions.append(rescored_prediction)
     write_jsonl(model_predictions_path, rescored_predictions)
-    return rescored_predictions
+    requested_predictions = [
+        prediction for prediction in rescored_predictions if prediction["id"] in requested_ids
+    ]
+    return rescored_predictions, {
+        "api_calls": sum(
+            int(prediction.get("api_attempts", 1))
+            for prediction in requested_predictions
+        ),
+        "cache_hits": len(examples) - len(requested_predictions),
+        "usage": aggregate_usage(requested_predictions),
+        "usage_by_execution": aggregate_usage_by_execution(requested_predictions),
+    }
 
 
 def result_suffix() -> str:
@@ -1105,6 +1193,8 @@ def run_model_prediction(example: dict[str, object], model: ModelRun) -> dict[st
         "eval_result": eval_result,
         "response_id": response.get("id"),
         "usage": response.get("usage"),
+        "execution": "synchronous",
+        "api_attempts": 1,
     }
 
 
@@ -1166,6 +1256,7 @@ def freeze_bfcl() -> None:
             },
             "local_configs": {
                 "project_yaml_sha256": file_sha256(project_config),
+                "models_yaml_sha256": file_sha256(REPO_ROOT / "configs/models.yaml"),
                 "subset_yaml_sha256": file_sha256(subset_config),
             },
             "model_list": {
@@ -1175,7 +1266,7 @@ def freeze_bfcl() -> None:
                         "id": model.id,
                         "provider": model.provider,
                         "tier": model.tier,
-                        "temperature": model.temperature,
+                        "sampling": model.sampling_parameters,
                     }
                     for model in configured_model_runs()
                 ],
@@ -1190,7 +1281,7 @@ def freeze_bfcl() -> None:
     print(f"Wrote {manifest_path.relative_to(REPO_ROOT)}")
 
 
-def clean_baseline() -> None:
+def clean_baseline(models: list[ModelRun]) -> dict[str, dict[str, object]]:
     manifest_path = REPO_ROOT / "artifacts/frozen/bfcl_manifest.json"
     subset_path = REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
     clean_results_dir = REPO_ROOT / "artifacts/results/clean"
@@ -1199,8 +1290,6 @@ def clean_baseline() -> None:
         clean_results_dir = clean_results_dir / suffix
     result_path = clean_results_dir / "clean_baseline_summary.json"
     oracle_predictions_path = clean_results_dir / "oracle_replay_predictions.jsonl"
-    models = configured_model_runs()
-
     if not manifest_path.exists():
         raise SystemExit("Missing artifacts/frozen/bfcl_manifest.json. Run prepare-subset first.")
     if not subset_path.exists():
@@ -1225,9 +1314,11 @@ def clean_baseline() -> None:
     model_metrics = {}
     model_category_metrics = {}
     model_prediction_paths = {}
+    model_run_metrics: dict[str, dict[str, object]] = {}
     for model in models:
+        model_started = time.perf_counter()
         model_predictions_path = clean_results_dir / f"{model.filename}_predictions.jsonl"
-        model_predictions = run_or_load_model_predictions(
+        model_predictions, invocation = run_or_load_model_predictions(
             examples, model_predictions_path, model
         )
         metrics = accuracy_metrics(model_predictions)
@@ -1237,6 +1328,10 @@ def clean_baseline() -> None:
         model_prediction_paths[model.id] = model_predictions_path.relative_to(
             REPO_ROOT
         ).as_posix()
+        model_run_metrics[model.id] = {
+            "wall_clock_seconds": round(time.perf_counter() - model_started, 3),
+            **invocation,
+        }
 
     write_json(
         result_path,
@@ -1260,13 +1355,16 @@ def clean_baseline() -> None:
                 "oracle_replay": category_metrics(predictions, examples_by_id),
                 **model_category_metrics,
             },
-            "temperature": models[0].temperature if models else None,
+            "model_configs": {
+                model.id: model.sampling_parameters for model in models
+            },
             "next_required_work": [
                 "Compare this clean baseline against noisy variants.",
             ],
         },
     )
     print(f"Wrote {result_path.relative_to(REPO_ROOT)}")
+    return model_run_metrics
 
 
 def paired_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
@@ -1360,7 +1458,7 @@ def paired_eval_dimension(dimension: str, model: ModelRun) -> dict[str, object]:
         {str(noisy_example["base_id"]) for noisy_example in noisy_examples},
         model,
     )
-    noisy_predictions = run_or_load_model_predictions(
+    noisy_predictions, invocation = run_or_load_model_predictions(
         noisy_examples, noisy_predictions_path, model
     )
     noisy_predictions_by_id = {prediction["id"]: prediction for prediction in noisy_predictions}
@@ -1410,22 +1508,46 @@ def paired_eval_dimension(dimension: str, model: ModelRun) -> dict[str, object]:
         "dimension": dimension,
         "summary": summary_path.relative_to(REPO_ROOT).as_posix(),
         "metrics": metrics,
+        "invocation": invocation,
     }
 
 
-def paired_eval() -> None:
+def paired_eval(models: list[ModelRun]) -> dict[str, dict[str, object]]:
     dimensions = generated_dimensions()
     if not dimensions:
         raise SystemExit("No generated noisy dimensions found. Run augment first.")
     suffix = result_suffix()
     limit = optional_positive_int_env("REALISTIC_BFCL_EVAL_LIMIT")
-    models = configured_model_runs()
     summary_name = f"summary_{suffix}.json" if suffix else "summary.json"
-    summaries = [
-        paired_eval_dimension(dimension, model)
-        for model in models
-        for dimension in dimensions
-    ]
+    summaries = []
+    model_run_metrics: dict[str, dict[str, object]] = {}
+    for model in models:
+        model_started = time.perf_counter()
+        model_summaries = [paired_eval_dimension(dimension, model) for dimension in dimensions]
+        summaries.extend(model_summaries)
+        model_usage: dict[str, float] = {}
+        model_usage_by_execution: dict[str, dict[str, float]] = {}
+        api_calls = 0
+        cache_hits = 0
+        for summary in model_summaries:
+            invocation = summary["invocation"]
+            usage = invocation["usage"]
+            if isinstance(usage, dict):
+                model_usage = merge_usage(model_usage, usage)
+            usage_by_execution = invocation["usage_by_execution"]
+            if isinstance(usage_by_execution, dict):
+                model_usage_by_execution = merge_usage_by_execution(
+                    model_usage_by_execution, usage_by_execution
+                )
+            api_calls += int(invocation["api_calls"])
+            cache_hits += int(invocation["cache_hits"])
+        model_run_metrics[model.id] = {
+            "wall_clock_seconds": round(time.perf_counter() - model_started, 3),
+            "usage": model_usage,
+            "usage_by_execution": model_usage_by_execution,
+            "api_calls": api_calls,
+            "cache_hits": cache_hits,
+        }
     write_json(
         REPO_ROOT / f"artifacts/results/paired/{summary_name}",
         {
@@ -1436,7 +1558,7 @@ def paired_eval() -> None:
                     "id": model.id,
                     "provider": model.provider,
                     "tier": model.tier,
-                    "temperature": model.temperature,
+                    "sampling": model.sampling_parameters,
                 }
                 for model in models
             ],
@@ -1444,8 +1566,68 @@ def paired_eval() -> None:
             "dimensions": summaries,
         },
     )
+    return model_run_metrics
 
 
-def run_bfcl() -> None:
-    clean_baseline()
-    paired_eval()
+def run_bfcl(selected_models: list[str] | None = None) -> None:
+    models = configured_model_runs(selected_models)
+    started_at = utc_now()
+    run_started = time.perf_counter()
+    clean_metrics = clean_baseline(models)
+    noisy_metrics = paired_eval(models)
+    run_id = (
+        f"run-{started_at.replace(':', '').replace('+', '_')}-"
+        f"{time.time_ns() % 1_000_000_000:09d}"
+    )
+    model_metrics = []
+    for model in models:
+        clean = clean_metrics[model.id]
+        noisy = noisy_metrics[model.id]
+        usage = merge_usage(clean["usage"], noisy["usage"])
+        usage_by_execution = merge_usage_by_execution(
+            clean["usage_by_execution"], noisy["usage_by_execution"]
+        )
+        model_metrics.append(
+            {
+                "name": model.name,
+                "id": model.id,
+                "provider": model.provider,
+                "tier": model.tier,
+                "sampling": model.sampling_parameters,
+                "usage": usage,
+                "usage_by_execution": usage_by_execution,
+                "api_calls": int(clean["api_calls"]) + int(noisy["api_calls"]),
+                "cache_hits": int(clean["cache_hits"]) + int(noisy["cache_hits"]),
+                "estimated_cost_usd": estimated_invocation_cost_usd(
+                    model, usage_by_execution
+                ),
+                "cost_basis": "provider_reported_or_configured_by_execution",
+                "pricing_source": model.pricing_source,
+                "wall_clock_seconds": round(
+                    float(clean["wall_clock_seconds"]) + float(noisy["wall_clock_seconds"]), 3
+                ),
+            }
+        )
+    manifest_path = REPO_ROOT / "artifacts" / run_id / "manifest.json"
+    write_json(
+        manifest_path,
+        {
+            "run_id": run_id,
+            "started_at": started_at,
+            "completed_at": utc_now(),
+            "wall_clock_seconds": round(time.perf_counter() - run_started, 3),
+            "frozen_dataset": {
+                "clean_subset_sha256": file_sha256(
+                    REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
+                ),
+                "dimensions": {
+                    dimension: file_sha256(
+                        REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
+                    )
+                    for dimension in generated_dimensions()
+                },
+            },
+            "models": model_metrics,
+        },
+    )
+    print(f"Wrote {manifest_path.relative_to(REPO_ROOT)}")

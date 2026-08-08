@@ -75,6 +75,14 @@ change.
 | `claude-haiku-4-5-20251001` | 2,351 | 83.2% | 82.6% | 0.5 pp |
 | `z-ai/glm-4.6` | 2,351 | 84.5% | 83.6% | 0.9 pp |
 
+These are genuinely three separate model runs, not three labels produced by one
+judge: the checked-in `model_comparison.csv` and paired artifacts identify the
+provider and model on every row. However, none of these three is a frontier-tier
+model. The current evidence therefore does **not** establish that degradation
+persists at the frontier. `claude-sonnet-4-6` is registered for that required
+run, but it must not be described as evaluated until its full-pool artifacts
+exist.
+
 The effect is **not** "messy prompts break every model equally," and it is
 **not** a clean capability gradient. Aggregate degradation is largest on the
 cheap model, but not monotonic: GLM-4.6 has the highest clean accuracy yet shows
@@ -251,11 +259,22 @@ REALISTIC_BFCL_LLM_DIMENSIONS=llm_super_casual_abbreviations,llm_frustrated_swea
 ```
 
 `run-bfcl` evaluates clean and noisy prompts with the same model, schemas, BFCL
-AST checker, cache, and parallel model calls. The model list and temperature are
-configured in `configs/project.yaml`; temperature is recorded in run metadata and
-included in cache fingerprints. Each model writes its own cache files, so one
+AST checker, cache, and parallel model calls. Model ids, providers, sampling
+parameters, tiers, and cost rates are configured in `configs/models.yaml`.
+Each model writes its own collision-checked cache namespace, so one
 frozen noisy dataset can be evaluated across small, mid-tier, and frontier
 models without regenerating augmentations.
+
+Select models by registry name or exact id:
+
+```bash
+python scripts/run_stage.py run-bfcl --models nano,haiku,glm
+make run-bfcl MODELS=nano,haiku,frontier
+```
+
+Every completed invocation writes `artifacts/<run_id>/manifest.json` with the
+selected model configs, frozen-dataset hashes, token usage, estimated per-model
+cost, and wall-clock time.
 
 `analyze` writes paired degradation metrics and review files under
 `artifacts/analysis/`, including raw and adjusted degradation plus
@@ -291,8 +310,7 @@ path for larger model comparisons:
 
 ```bash
 REALISTIC_BFCL_EXECUTION=batch \
-REALISTIC_BFCL_MODELS=anthropic:claude-haiku-4-5-20251001:mid \
-python scripts/run_stage.py run-bfcl
+python scripts/run_stage.py run-bfcl --models haiku
 ```
 
 Batch runs write the same prediction caches and paired summaries as synchronous
@@ -304,10 +322,7 @@ GLM-4.6 was served via OpenRouter pinned to the DeepInfra backend for the
 reported full-pool run:
 
 ```bash
-REALISTIC_BFCL_MODELS=openrouter:z-ai/glm-4.6:strong-open \
-REALISTIC_BFCL_OPENROUTER_PROVIDER_ONLY=DeepInfra \
-REALISTIC_BFCL_ROUTER_MAX_OUTPUT_TOKENS=1024 \
-python scripts/run_stage.py run-bfcl
+python scripts/run_stage.py run-bfcl --models glm
 ```
 
 Because GLM-4.6 is open weights and is served at varying precision across
