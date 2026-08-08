@@ -265,6 +265,7 @@ Select models by registry name or exact id:
 ```bash
 python scripts/run_stage.py run-bfcl --models nano,haiku,glm
 make run-bfcl MODELS=nano,haiku,frontier
+python scripts/run_stage.py run-bfcl --models nano --env-file /path/to/.env
 ```
 
 Every completed invocation writes `artifacts/<run_id>/manifest.json` with the
@@ -298,8 +299,10 @@ Set `REALISTIC_BFCL_BFCL_ROOT=/path/to/gorilla` when the checkout is not in the
 default local inspection path.
 
 `run-bfcl` runs `oracle_replay` and the models listed in
-`configs/project.yaml`. API keys can be provided through the environment,
-`REALISTIC_BFCL_ENV_FILE=/path/to/.env`, or a sibling `../underlayer/.env` file.
+`configs/project.yaml`. API-key resolution is explicit: `--env-file` takes
+precedence over `REALISTIC_BFCL_ENV_FILE=/path/to/.env`, which takes precedence
+over provider keys in the process environment. No repository or sibling `.env`
+file is loaded implicitly.
 Missing synchronous predictions run in parallel with `REALISTIC_BFCL_CONCURRENCY`,
 which defaults to `8`.
 

@@ -29,6 +29,7 @@ ROUTER_TOOL_CHOICE = "required"
 DEFAULT_ROUTER_MAX_OUTPUT_TOKENS = 256
 ROUTER_MESSAGE_SERIALIZATION = "preserve_bfcl_turns_v1"
 RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
+_EXPLICIT_ENV_FILE: Path | None = None
 BFCL_CATEGORY_FILES = {
     "simple_python": (
         "BFCL_v4_simple_python.json",
@@ -346,119 +347,119 @@ def conversation_text(question: object) -> str:
 
 
 def read_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
     if not path.exists():
-        return values
-    for line in path.read_text(encoding="utf-8").splitlines():
+        raise SystemExit(f"Environment file does not exist: {path}")
+    if not path.is_file():
+        raise SystemExit(f"Environment file is not a regular file: {path}")
+
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise SystemExit(f"Could not read environment file {path}: {error}") from error
+    for line_number, line in enumerate(lines, start=1):
         stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
+        if not stripped or stripped.startswith("#"):
             continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export ") :].lstrip()
+        if "=" not in stripped:
+            raise SystemExit(
+                f"Invalid environment file {path}: line {line_number} must be KEY=VALUE."
+            )
         key, value = stripped.split("=", 1)
-        values[key.strip()] = value.strip().strip("'\"")
+        key = key.strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise SystemExit(
+                f"Invalid environment file {path}: line {line_number} has an invalid key."
+            )
+        if key in values:
+            raise SystemExit(
+                f"Invalid environment file {path}: line {line_number} duplicates {key}."
+            )
+        values[key] = parse_env_value(value, path=path, line_number=line_number)
     return values
 
 
-def openai_api_key() -> str:
-    if os.environ.get("OPENAI_API_KEY"):
-        return os.environ["OPENAI_API_KEY"]
+def parse_env_value(value: str, *, path: Path, line_number: int) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    if value[0] in {"'", '"'}:
+        quote = value[0]
+        closing_index = value.find(quote, 1)
+        if closing_index == -1:
+            raise SystemExit(
+                f"Invalid environment file {path}: line {line_number} has "
+                "an unmatched quote."
+            )
+        trailing = value[closing_index + 1 :].strip()
+        if trailing and not trailing.startswith("#"):
+            raise SystemExit(
+                f"Invalid environment file {path}: line {line_number} has text "
+                "after a quoted value."
+            )
+        return value[1:closing_index]
 
-    candidates = [
-        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
-        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
-        else None,
-        REPO_ROOT.parent / "underlayer/.env",
-    ]
+    comment_match = re.search(r"\s+#", value)
+    if comment_match:
+        value = value[: comment_match.start()]
+    return value.rstrip()
+
+
+def set_explicit_env_file(path: Path | None) -> None:
+    global _EXPLICIT_ENV_FILE
+    _EXPLICIT_ENV_FILE = None
+    if path is not None:
+        read_env_file(path)
+    _EXPLICIT_ENV_FILE = path
+
+
+def api_key_from_config(key_names: tuple[str, ...]) -> str:
+    env_file = os.environ.get("REALISTIC_BFCL_ENV_FILE")
+    candidates = [_EXPLICIT_ENV_FILE]
+    if env_file:
+        configured_path = Path(env_file)
+        if configured_path != _EXPLICIT_ENV_FILE:
+            candidates.append(configured_path)
+
     for path in candidates:
         if path is None:
             continue
-        key = read_env_file(path).get("OPENAI_API_KEY")
-        if key:
-            return key
+        values = read_env_file(path)
+        for key_name in key_names:
+            if values.get(key_name):
+                return values[key_name]
 
+    for key_name in key_names:
+        if os.environ.get(key_name):
+            return os.environ[key_name]
+
+    names = " or ".join(key_names)
     raise SystemExit(
-        "Missing OPENAI_API_KEY. Set it in the environment or REALISTIC_BFCL_ENV_FILE."
+        f"Missing {names}. Provide it with --env-file, REALISTIC_BFCL_ENV_FILE, "
+        "or the process environment."
     )
+
+
+def openai_api_key() -> str:
+    return api_key_from_config(("OPENAI_API_KEY",))
 
 
 def anthropic_api_key() -> str:
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return os.environ["ANTHROPIC_API_KEY"]
-    if os.environ.get("CLAUDE_API_KEY"):
-        return os.environ["CLAUDE_API_KEY"]
-
-    candidates = [
-        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
-        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
-        else None,
-        REPO_ROOT / ".env",
-        REPO_ROOT.parent / "underlayer/.env",
-    ]
-    for path in candidates:
-        if path is None:
-            continue
-        values = read_env_file(path)
-        key = values.get("ANTHROPIC_API_KEY") or values.get("CLAUDE_API_KEY")
-        if key:
-            return key
-
-    raise SystemExit(
-        "Missing ANTHROPIC_API_KEY or CLAUDE_API_KEY. Set it in the environment or "
-        "REALISTIC_BFCL_ENV_FILE."
-    )
+    return api_key_from_config(("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"))
 
 
 def xai_api_key() -> str:
-    if os.environ.get("XAI_API_KEY"):
-        return os.environ["XAI_API_KEY"]
-    if os.environ.get("GROK_API_KEY"):
-        return os.environ["GROK_API_KEY"]
+    return api_key_from_config(("XAI_API_KEY", "GROK_API_KEY"))
 
-    candidates = [
-        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
-        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
-        else None,
-        REPO_ROOT / ".env",
-        REPO_ROOT.parent / "underlayer/.env",
-    ]
-    for path in candidates:
-        if path is None:
-            continue
-        values = read_env_file(path)
-        key = values.get("XAI_API_KEY") or values.get("GROK_API_KEY")
-        if key:
-            return key
 
-    raise SystemExit(
-        "Missing XAI_API_KEY or GROK_API_KEY. Set it in the environment or "
-        "REALISTIC_BFCL_ENV_FILE."
-    )
+def grok_api_key() -> str:
+    return api_key_from_config(("GROK_API_KEY", "XAI_API_KEY"))
 
 
 def openrouter_api_key() -> str:
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return os.environ["OPENROUTER_API_KEY"]
-    if os.environ.get("OPEN_ROUTER_API_KEY"):
-        return os.environ["OPEN_ROUTER_API_KEY"]
-
-    candidates = [
-        Path(os.environ["REALISTIC_BFCL_ENV_FILE"])
-        if os.environ.get("REALISTIC_BFCL_ENV_FILE")
-        else None,
-        REPO_ROOT / ".env",
-        REPO_ROOT.parent / "underlayer/.env",
-    ]
-    for path in candidates:
-        if path is None:
-            continue
-        values = read_env_file(path)
-        key = values.get("OPENROUTER_API_KEY") or values.get("OPEN_ROUTER_API_KEY")
-        if key:
-            return key
-
-    raise SystemExit(
-        "Missing OPENROUTER_API_KEY or OPEN_ROUTER_API_KEY. Set it in the environment "
-        "or REALISTIC_BFCL_ENV_FILE."
-    )
+    return api_key_from_config(("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"))
 
 
 def openai_concurrency() -> int:
