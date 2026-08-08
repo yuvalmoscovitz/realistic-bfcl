@@ -742,6 +742,8 @@ def run_or_load_anthropic_batch_predictions(
                 "eval_result": eval_result,
                 "response_id": response.get("id"),
                 "usage": response.get("usage"),
+                "execution": "anthropic_batch",
+                "api_attempts": 1,
                 "input_fingerprint": expected_fingerprints[example_id],
             }
         )
@@ -752,6 +754,8 @@ def run_or_load_anthropic_batch_predictions(
 
     for example_id in failed_example_ids:
         prediction = run_model_prediction(examples_by_id[example_id], model)
+        prediction["execution"] = "synchronous_retry"
+        prediction["api_attempts"] = 2
         prediction["input_fingerprint"] = expected_fingerprints[example_id]
         cached_predictions[example_id] = prediction
         append_jsonl(model_predictions_path, prediction)
@@ -920,7 +924,32 @@ def merge_usage(*usage_rows: dict[str, float]) -> dict[str, float]:
     return totals
 
 
-def estimated_cost_usd(model: ModelRun, usage: dict[str, float]) -> float | None:
+def aggregate_usage_by_execution(
+    predictions: list[dict[str, object]],
+) -> dict[str, dict[str, float]]:
+    by_execution: dict[str, list[dict[str, object]]] = {}
+    for prediction in predictions:
+        execution = str(prediction.get("execution", "synchronous"))
+        by_execution.setdefault(execution, []).append(prediction)
+    return {
+        execution: aggregate_usage(execution_predictions)
+        for execution, execution_predictions in by_execution.items()
+    }
+
+
+def merge_usage_by_execution(
+    *usage_rows: dict[str, dict[str, float]],
+) -> dict[str, dict[str, float]]:
+    totals: dict[str, dict[str, float]] = {}
+    for usage_by_execution in usage_rows:
+        for execution, usage in usage_by_execution.items():
+            totals[execution] = merge_usage(totals.get(execution, {}), usage)
+    return totals
+
+
+def estimated_cost_usd(
+    model: ModelRun, usage: dict[str, float], execution: str = "synchronous"
+) -> float | None:
     if usage.get("cost", 0.0) > 0:
         return round(usage["cost"], 6)
     if (
@@ -930,13 +959,7 @@ def estimated_cost_usd(model: ModelRun, usage: dict[str, float]) -> float | None
         return None
     input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0.0))
     output_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0.0))
-    execution = os.environ.get("REALISTIC_BFCL_EXECUTION", "").strip().lower()
-    batch_multiplier = (
-        0.5
-        if execution in {"batch", "anthropic_batch"}
-        and model.provider in {"anthropic", "claude"}
-        else 1.0
-    )
+    batch_multiplier = 0.5 if execution == "anthropic_batch" else 1.0
     return round(
         (
             input_tokens * model.input_cost_per_million_tokens
@@ -946,6 +969,18 @@ def estimated_cost_usd(model: ModelRun, usage: dict[str, float]) -> float | None
         * batch_multiplier,
         6,
     )
+
+
+def estimated_invocation_cost_usd(
+    model: ModelRun, usage_by_execution: dict[str, dict[str, float]]
+) -> float | None:
+    costs = [
+        estimated_cost_usd(model, usage, execution)
+        for execution, usage in usage_by_execution.items()
+    ]
+    if any(cost is None for cost in costs):
+        return None
+    return round(sum(float(cost) for cost in costs), 6)
 
 
 def input_fingerprint(example: dict[str, object], model: ModelRun) -> str:
@@ -1074,9 +1109,13 @@ def run_or_load_model_predictions(
         prediction for prediction in rescored_predictions if prediction["id"] in requested_ids
     ]
     return rescored_predictions, {
-        "api_calls": len(requested_predictions),
+        "api_calls": sum(
+            int(prediction.get("api_attempts", 1))
+            for prediction in requested_predictions
+        ),
         "cache_hits": len(examples) - len(requested_predictions),
         "usage": aggregate_usage(requested_predictions),
+        "usage_by_execution": aggregate_usage_by_execution(requested_predictions),
     }
 
 
@@ -1154,6 +1193,8 @@ def run_model_prediction(example: dict[str, object], model: ModelRun) -> dict[st
         "eval_result": eval_result,
         "response_id": response.get("id"),
         "usage": response.get("usage"),
+        "execution": "synchronous",
+        "api_attempts": 1,
     }
 
 
@@ -1485,6 +1526,7 @@ def paired_eval(models: list[ModelRun]) -> dict[str, dict[str, object]]:
         model_summaries = [paired_eval_dimension(dimension, model) for dimension in dimensions]
         summaries.extend(model_summaries)
         model_usage: dict[str, float] = {}
+        model_usage_by_execution: dict[str, dict[str, float]] = {}
         api_calls = 0
         cache_hits = 0
         for summary in model_summaries:
@@ -1492,11 +1534,17 @@ def paired_eval(models: list[ModelRun]) -> dict[str, dict[str, object]]:
             usage = invocation["usage"]
             if isinstance(usage, dict):
                 model_usage = merge_usage(model_usage, usage)
+            usage_by_execution = invocation["usage_by_execution"]
+            if isinstance(usage_by_execution, dict):
+                model_usage_by_execution = merge_usage_by_execution(
+                    model_usage_by_execution, usage_by_execution
+                )
             api_calls += int(invocation["api_calls"])
             cache_hits += int(invocation["cache_hits"])
         model_run_metrics[model.id] = {
             "wall_clock_seconds": round(time.perf_counter() - model_started, 3),
             "usage": model_usage,
+            "usage_by_execution": model_usage_by_execution,
             "api_calls": api_calls,
             "cache_hits": cache_hits,
         }
@@ -1536,6 +1584,9 @@ def run_bfcl(selected_models: list[str] | None = None) -> None:
         clean = clean_metrics[model.id]
         noisy = noisy_metrics[model.id]
         usage = merge_usage(clean["usage"], noisy["usage"])
+        usage_by_execution = merge_usage_by_execution(
+            clean["usage_by_execution"], noisy["usage_by_execution"]
+        )
         model_metrics.append(
             {
                 "name": model.name,
@@ -1544,20 +1595,13 @@ def run_bfcl(selected_models: list[str] | None = None) -> None:
                 "tier": model.tier,
                 "sampling": model.sampling_parameters,
                 "usage": usage,
+                "usage_by_execution": usage_by_execution,
                 "api_calls": int(clean["api_calls"]) + int(noisy["api_calls"]),
                 "cache_hits": int(clean["cache_hits"]) + int(noisy["cache_hits"]),
-                "estimated_cost_usd": estimated_cost_usd(model, usage),
-                "cost_basis": (
-                    "provider_reported"
-                    if usage.get("cost", 0.0) > 0
-                    else (
-                        "configured_batch_token_rates"
-                        if os.environ.get("REALISTIC_BFCL_EXECUTION", "").strip().lower()
-                        in {"batch", "anthropic_batch"}
-                        and model.provider in {"anthropic", "claude"}
-                        else "configured_standard_token_rates"
-                    )
+                "estimated_cost_usd": estimated_invocation_cost_usd(
+                    model, usage_by_execution
                 ),
+                "cost_basis": "provider_reported_or_configured_by_execution",
                 "pricing_source": model.pricing_source,
                 "wall_clock_seconds": round(
                     float(clean["wall_clock_seconds"]) + float(noisy["wall_clock_seconds"]), 3

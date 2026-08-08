@@ -6,7 +6,11 @@ import pytest
 
 from realistic_bfcl import analyze, evaluate
 from realistic_bfcl.common import article_primary_model, configured_model_runs, model_registry
-from realistic_bfcl.evaluate import estimated_cost_usd, input_fingerprint
+from realistic_bfcl.evaluate import (
+    estimated_cost_usd,
+    estimated_invocation_cost_usd,
+    input_fingerprint,
+)
 
 
 def test_model_registry_spans_tiers_and_has_unique_namespaces() -> None:
@@ -43,15 +47,30 @@ def test_estimated_cost_uses_provider_token_names() -> None:
     assert cost == 2.70
 
 
-def test_batch_cost_uses_anthropic_discount(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_batch_cost_uses_anthropic_discount() -> None:
     model = configured_model_runs(["haiku"])[0]
-    monkeypatch.setenv("REALISTIC_BFCL_EXECUTION", "batch")
 
     cost = estimated_cost_usd(
-        model, {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+        model,
+        {"input_tokens": 1_000_000, "output_tokens": 1_000_000},
+        "anthropic_batch",
     )
 
     assert cost == 3.0
+
+
+def test_mixed_batch_and_retry_costs_use_their_own_rates() -> None:
+    model = configured_model_runs(["haiku"])[0]
+
+    cost = estimated_invocation_cost_usd(
+        model,
+        {
+            "anthropic_batch": {"input_tokens": 1_000_000},
+            "synchronous_retry": {"output_tokens": 1_000_000},
+        },
+    )
+
+    assert cost == 5.5
 
 
 def test_openrouter_routing_is_part_of_cache_fingerprint(
@@ -99,6 +118,9 @@ def test_run_manifest_records_model_cost_and_wall_clock(
             models[0].id: {
                 "wall_clock_seconds": 1.25,
                 "usage": {"input_tokens": 1_000_000.0},
+                "usage_by_execution": {
+                    "synchronous": {"input_tokens": 1_000_000.0}
+                },
                 "api_calls": 1,
                 "cache_hits": 0,
             }
@@ -111,6 +133,9 @@ def test_run_manifest_records_model_cost_and_wall_clock(
             models[0].id: {
                 "wall_clock_seconds": 2.75,
                 "usage": {"output_tokens": 2_000_000.0},
+                "usage_by_execution": {
+                    "synchronous": {"output_tokens": 2_000_000.0}
+                },
                 "api_calls": 1,
                 "cache_hits": 0,
             }
