@@ -306,6 +306,11 @@ file is loaded implicitly.
 Missing synchronous predictions run in parallel with `REALISTIC_BFCL_CONCURRENCY`,
 which defaults to `8`.
 
+Before committing, install the repository hooks with `pre-commit install`.
+They reject private `.env` files and run gitleaks on staged changes. See
+[SECURITY.md](SECURITY.md) for the full-history audit result and credential
+handling policy.
+
 Anthropic models can also run through Message Batches, which is the practical
 path for larger model comparisons:
 
