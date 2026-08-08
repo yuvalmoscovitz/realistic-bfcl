@@ -1,7 +1,7 @@
 # Realistic-BFCL
 
 **Your evals are cleaner than your users.** Clean evals tell you whether your
-agent *can* do the task, They don't tell you whether it *will*.
+agent *can* do the task, they don't tell you whether it *will*.
 
 Realistic-BFCL is a realism-controlled metamorphic benchmark layer over the
 Berkeley Function Calling Leaderboard (BFCL). It keeps BFCL's trusted gold
