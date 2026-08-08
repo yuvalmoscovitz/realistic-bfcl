@@ -30,6 +30,12 @@ dimension-level results, repeat-run stability, category/error taxonomies,
 candidate examples, included examples, oracle-issue examples, and per-model raw
 summaries.
 
+The three rows above are separate evaluation models, even though the original
+frozen-subset manifest predates the Haiku and GLM runs. None is labeled as a
+frontier model. Historical raw cost and timing metadata were not retained, so
+the repository does not invent those values retroactively; new runs write them
+to `artifacts/<run_id>/manifest.json`.
+
 ## `clean_to_noisy_failures.csv`
 
 This is the row-level audit table, not the aggregate statistics table. Use

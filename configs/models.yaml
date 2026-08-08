@@ -1,0 +1,55 @@
+pricing_as_of: 2026-08-08
+
+models:
+  - name: nano
+    id: gpt-5.4-nano
+    provider: openai
+    tier: small
+    article_primary: true
+    sampling:
+      temperature: 0
+      max_output_tokens: 256
+    pricing_usd_per_million_tokens:
+      input: 0.20
+      output: 1.25
+    pricing_source: https://developers.openai.com/api/docs/models/gpt-5.4-nano
+
+  - name: haiku
+    id: claude-haiku-4-5-20251001
+    provider: anthropic
+    tier: mid
+    sampling:
+      temperature: 0
+      max_output_tokens: 256
+    pricing_usd_per_million_tokens:
+      input: 1.00
+      output: 5.00
+    pricing_source: https://platform.claude.com/docs/en/about-claude/pricing
+
+  - name: glm
+    id: z-ai/glm-4.6
+    provider: openrouter
+    tier: strong-open
+    sampling:
+      temperature: 0
+      max_output_tokens: 1024
+    pricing_usd_per_million_tokens:
+      input: 0.162
+      output: 2.00
+    pricing_source: https://openrouter.ai/z-ai/glm-4.6
+    provider_options:
+      only:
+        - DeepInfra
+      allow_fallbacks: false
+
+  - name: frontier
+    id: claude-sonnet-4-6
+    provider: anthropic
+    tier: frontier
+    sampling:
+      temperature: 0
+      max_output_tokens: 256
+    pricing_usd_per_million_tokens:
+      input: 3.00
+      output: 15.00
+    pricing_source: https://platform.claude.com/docs/en/about-claude/pricing

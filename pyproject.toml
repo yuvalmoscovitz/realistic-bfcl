@@ -9,9 +9,10 @@ description = "Realism-controlled metamorphic benchmark layer over BFCL."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
+dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.8"]
+dev = ["pytest>=7.4", "ruff>=0.8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -16,7 +16,7 @@ augment:
 	$(RUN_STAGE) augment
 
 run-bfcl:
-	$(RUN_STAGE) run-bfcl
+	$(RUN_STAGE) run-bfcl $(if $(MODELS),--models $(MODELS),)
 
 analyze:
 	$(RUN_STAGE) analyze

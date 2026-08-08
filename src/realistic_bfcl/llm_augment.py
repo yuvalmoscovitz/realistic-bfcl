@@ -18,8 +18,8 @@ from .augment import (
 )
 from .common import (
     DIMENSION_FILES,
-    OPENAI_MODEL,
     REPO_ROOT,
+    article_primary_model,
     conversation_text,
     openai_api_key,
     openai_concurrency,
@@ -294,7 +294,9 @@ def llm_augment_model() -> str:
         return os.environ["REALISTIC_BFCL_LLM_AUGMENT_MODEL"]
     if llm_augment_provider() == "grok":
         return DEFAULT_GROK_AUGMENT_MODEL
-    return os.environ.get("REALISTIC_BFCL_LLM_AUGMENT_MODEL", OPENAI_MODEL)
+    return os.environ.get(
+        "REALISTIC_BFCL_LLM_AUGMENT_MODEL", article_primary_model().id
+    )
 
 
 def llm_augment_provider() -> str:

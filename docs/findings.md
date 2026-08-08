@@ -51,6 +51,13 @@ change.
 | `claude-haiku-4-5-20251001` | Anthropic | mid | 83.2% | 82.6% | 0.5 pp |
 | `z-ai/glm-4.6` | OpenRouter | strong-open | 84.5% | 83.6% | 0.9 pp |
 
+This table is backed by three distinct provider/model runs. It does not include
+a frontier-tier model: GLM-4.6 is intentionally labeled `strong-open`, not
+frontier. Consequently, the result currently supports cross-model persistence
+across the tested capability range but **does not yet show whether degradation
+persists at the frontier**. The frontier run is a required follow-up, and this
+note will report a null result plainly if the degradation disappears there.
+
 Clean accuracy rises across these three models, from `76.1%` to `83.2%` to
 `84.5%`, but aggregate degradation is **not** monotonic: GLM-4.6 has the highest
 clean accuracy yet a larger average drop than Haiku, because it takes bigger
