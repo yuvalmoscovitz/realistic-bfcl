@@ -90,10 +90,10 @@ a larger aggregate drop than Haiku. The cheap model is fragile to a broad range
 of phrasing noise; capable models shed almost all of it. What survives is
 specific.
 
-The through-line is **telegraphic shorthand**: terse, grammar-free phrasing, one
-of the most common ways real users address an LLM. It degrades every model, and
-it is the only dimension significant after multiple-comparison correction on
-both capable models. Profanity, captured by `cursing`, is a secondary signal.
+The largest cross-model signal is **telegraphic shorthand**: terse,
+grammar-free phrasing, one of the most common ways real users address an LLM.
+It degrades every model. Profanity, captured by `cursing`, is a smaller signal;
+both dimensions are significant on all three models after Holm correction.
 `pasted_context_block` is the instructive reversal: it is the largest and most
 significant degradation on the cheap model, but a coin flip on both capable
 models.
@@ -126,7 +126,9 @@ the same model was correct on the clean prompt and wrong on the augmented
 prompt, with the clean prompt, noisy prompt, expected BFCL tool calls, both
 model calls, evaluator error, provider response ids, and explicit manual review
 status and notes.
-Use `paired_stats.csv` and `model_comparison.csv` for headline aggregate counts.
+Use `artifacts/analysis/significance.csv` for bootstrap confidence intervals,
+exact McNemar p-values, and Holm-adjusted decisions; the article bundle's
+`model_comparison.csv` contains the source paired counts.
 
 Three inspectable examples from that table:
 
@@ -187,6 +189,8 @@ artifacts/analysis/article/
   clean_to_noisy_failures.csv  Exhaustive clean-correct/noisy-wrong rows.
   model_comparison.csv         Cross-model clean/noisy comparison.
   paired_stats.csv             Paired McNemar statistics.
+artifacts/analysis/
+  significance.csv             Bootstrap CIs and Holm-adjusted paired tests.
 ```
 
 ## Research Commands
@@ -282,6 +286,9 @@ cost, and wall-clock time.
 `model_comparison.csv`, a per-model/per-dimension table with clean accuracy,
 noisy accuracy, degradation, clean-success/noisy-failure counts, reviewed
 regression counts, and failure-type taxonomy.
+It also writes `significance.csv`, with paired bootstrap confidence intervals,
+exact McNemar p-values, and Holm-adjusted p-values for every model/dimension
+cell.
 
 To inspect all registered steps:
 

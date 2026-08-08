@@ -3,6 +3,7 @@
 !README.md
 !analysis/
 analysis/*
+!analysis/significance.csv
 !analysis/article/
 !analysis/article/*.csv
 !analysis/article/*.json

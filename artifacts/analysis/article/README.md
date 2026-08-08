@@ -8,6 +8,9 @@ directory is for inspection and reproducibility.
 
 - `model_comparison.csv`: full-pool per-model/per-dimension comparison for
   nano, Haiku, and GLM-4.6.
+- `../significance.csv`: the 21-cell inferential artifact, with paired
+  bootstrap confidence intervals, exact McNemar p-values, and Holm-adjusted
+  decisions.
 - `paired_stats.csv`: paired contingency counts, McNemar p-values, and
   multiple-comparison corrections.
 - `clean_to_noisy_failures.csv`: exhaustive reviewed clean-correct/noisy-wrong
@@ -39,8 +42,10 @@ to `artifacts/<run_id>/manifest.json`.
 ## `clean_to_noisy_failures.csv`
 
 This is the row-level audit table, not the aggregate statistics table. Use
-`paired_stats.csv` and `model_comparison.csv` for headline counts and McNemar
-statistics.
+`../significance.csv` for published uncertainty and adjusted decisions, and
+`model_comparison.csv` for the source paired counts. `paired_stats.csv` retains
+the earlier Bonferroni/FDR columns for provenance but is not the current claims
+artifact.
 
 Important columns:
 

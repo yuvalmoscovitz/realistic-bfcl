@@ -9,12 +9,12 @@ actually do.** This note measures that gap on BFCL tool-calling.
 Across three models of increasing clean accuracy, clean BFCL accuracy overstates
 robustness to ordinary, production-like phrasing, and the clean benchmark cannot
 see the gap. The cheap model is fragile to a broad range of phrasing noise.
-Capable models shed almost all of it, with one exception that survives across
-the stronger models tested:
+Capable models shed most of it, but two effects survive across the stronger
+models tested:
 
-> **Telegraphic shorthand - terse, grammar-free phrasing - is the one noise
-> dimension that degrades every model tested, and the only one that stays
-> significant on both capable models after multiple-comparison correction.**
+> **Telegraphic shorthand - terse, grammar-free phrasing - is the largest
+> cross-model effect. Cursing is smaller, but both remain significant on all
+> three tested models after Holm correction.**
 
 This is the "can vs. will" gap made concrete. Every model here can price two
 machines when asked in clean prose, and clean BFCL confirms it. Phrase the same
@@ -35,10 +35,15 @@ All runs are full-pool, 2,351 examples, at temperature `0`. For each model and
 dimension, we report the two paired discordant counts: clean-to-noisy failures
 and noisy-to-clean fixes. We also report an exact McNemar test on those counts.
 Reporting both directions prevents weak, near-balanced dimensions from being
-laundered into a single pooled degradation number. Significance below is stated
-under Bonferroni correction across the seven dimensions per model
-(`alpha ~= 0.0071`), with Benjamini-Hochberg FDR noted where it changes the
-call.
+laundered into a single pooled degradation number. We use exact, two-sided
+McNemar tests and control family-wise error across the seven dimensions within
+each model using Holm-Bonferroni at `alpha = 0.05`. The 95% percentile bootstrap
+interval resamples paired binary example differences 10,000 times with seed
+`20260618`. For the checked-in legacy comparison, those binary differences are
+reconstructed exactly from the paired contingency counts: `b` values of `+1`,
+`c` values of `-1`, and zero for concordant pairs. Example identity does not
+change the bootstrap distribution of their mean. The complete generated table
+is `artifacts/analysis/significance.csv`.
 
 ## Headline Results
 
@@ -67,66 +72,66 @@ are uniformly more robust." The robust claim is dimension-specific.
 
 ## Per-Dimension Paired Results
 
-Sorted by exact p-value. `Sig` means significant under Bonferroni correction
-(`alpha ~= 0.0071`).
+`CI` is the 95% paired bootstrap interval for the absolute percentage-point
+drop. `p adj.` is the exact McNemar p-value after Holm correction within the
+model's seven-dimension family.
 
 ### `gpt-5.4-nano` (clean 76.1%)
 
-| Dimension | Noisy acc. | Drop | Fail | Fix | McNemar p | Sig |
+| Dimension | Noisy acc. | Drop (95% CI) | Fail | Fix | p adj. | Sig |
 |---|---:|---:|---:|---:|---:|:--:|
-| `pasted_context_block` | 74.2% | 1.9 pp | 96 | 51 | 0.00026 | **yes** |
-| `cursing` | 74.4% | 1.7 pp | 97 | 58 | 0.0022 | **yes** |
-| `telegraphic_request` | 74.6% | 1.4 pp | 98 | 64 | 0.0093 | no (FDR yes, q=0.022) |
-| `irrelevant_context` | 74.9% | 1.2 pp | 84 | 56 | 0.0222 | no (FDR yes, q=0.039) |
-| `argumentative_challenge` | 75.1% | 1.0 pp | 76 | 52 | 0.0416 | no |
-| `removed_spaces` | 75.3% | 0.8 pp | 76 | 57 | 0.1182 | no |
-| `typos` | 75.8% | 0.3 pp | 67 | 60 | 0.5946 | no |
+| `pasted_context_block` | 74.2% | 1.9 pp [0.9, 2.9] | 96 | 51 | 0.0018 | **yes** |
+| `cursing` | 74.4% | 1.7 pp [0.6, 2.7] | 97 | 58 | 0.0130 | **yes** |
+| `telegraphic_request` | 74.6% | 1.4 pp [0.4, 2.5] | 98 | 64 | 0.0465 | **yes** |
+| `irrelevant_context` | 74.9% | 1.2 pp [0.2, 2.2] | 84 | 56 | 0.0886 | no |
+| `argumentative_challenge` | 75.1% | 1.0 pp [0.1, 2.0] | 76 | 52 | 0.1249 | no |
+| `removed_spaces` | 75.3% | 0.8 pp [-0.1, 1.8] | 76 | 57 | 0.2365 | no |
+| `typos` | 75.8% | 0.3 pp [-0.6, 1.2] | 67 | 60 | 0.5946 | no |
 
 ### `claude-haiku-4-5-20251001` (clean 83.2%)
 
-| Dimension | Noisy acc. | Drop | Fail | Fix | McNemar p | Sig |
+| Dimension | Noisy acc. | Drop (95% CI) | Fail | Fix | p adj. | Sig |
 |---|---:|---:|---:|---:|---:|:--:|
-| `telegraphic_request` | 81.7% | 1.4 pp | 51 | 17 | 0.000045 | **yes** |
-| `cursing` | 82.4% | 0.8 pp | 30 | 12 | 0.0079 | no (borderline) |
-| `irrelevant_context` | 82.5% | 0.6 pp | 29 | 14 | 0.0315 | no |
-| `argumentative_challenge` | 82.7% | 0.5 pp | 23 | 12 | 0.0895 | no |
-| `removed_spaces` | 82.9% | 0.2 pp | 13 | 8 | 0.3833 | no |
-| `typos` | 83.0% | 0.1 pp | 12 | 9 | 0.6636 | no |
-| `pasted_context_block` | 83.1% | 0.1 pp | 26 | 24 | 0.8877 | no |
+| `telegraphic_request` | 81.7% | 1.4 pp [0.8, 2.1] | 51 | 17 | 0.00031 | **yes** |
+| `cursing` | 82.4% | 0.8 pp [0.3, 1.3] | 30 | 12 | 0.0475 | **yes** |
+| `irrelevant_context` | 82.5% | 0.6 pp [0.1, 1.2] | 29 | 14 | 0.1577 | no |
+| `argumentative_challenge` | 82.7% | 0.5 pp [0.0, 1.0] | 23 | 12 | 0.3581 | no |
+| `removed_spaces` | 82.9% | 0.2 pp [-0.2, 0.6] | 13 | 8 | 1.0000 | no |
+| `typos` | 83.0% | 0.1 pp [-0.3, 0.5] | 12 | 9 | 1.0000 | no |
+| `pasted_context_block` | 83.1% | 0.1 pp [-0.5, 0.7] | 26 | 24 | 1.0000 | no |
 
 ### `z-ai/glm-4.6` (clean 84.5%)
 
-| Dimension | Noisy acc. | Drop | Fail | Fix | McNemar p | Sig |
+| Dimension | Noisy acc. | Drop (95% CI) | Fail | Fix | p adj. | Sig |
 |---|---:|---:|---:|---:|---:|:--:|
-| `telegraphic_request` | 82.5% | 2.0 pp | 86 | 38 | 0.000019 | **yes** |
-| `cursing` | 83.1% | 1.4 pp | 76 | 43 | 0.0032 | **yes** |
-| `argumentative_challenge` | 83.7% | 0.9 pp | 60 | 40 | 0.0569 | no |
-| `irrelevant_context` | 83.8% | 0.7 pp | 52 | 36 | 0.1093 | no |
-| `removed_spaces` | 83.9% | 0.6 pp | 48 | 33 | 0.1193 | no |
-| `typos` | 84.0% | 0.6 pp | 49 | 36 | 0.1928 | no |
-| `pasted_context_block` | 84.3% | 0.2 pp | 46 | 42 | 0.7493 | no |
+| `telegraphic_request` | 82.5% | 2.0 pp [1.1, 3.0] | 86 | 38 | 0.00014 | **yes** |
+| `cursing` | 83.1% | 1.4 pp [0.5, 2.3] | 76 | 43 | 0.0191 | **yes** |
+| `argumentative_challenge` | 83.7% | 0.9 pp [0.0, 1.7] | 60 | 40 | 0.2844 | no |
+| `irrelevant_context` | 83.8% | 0.7 pp [-0.1, 1.5] | 52 | 36 | 0.4372 | no |
+| `removed_spaces` | 83.9% | 0.6 pp [-0.1, 1.4] | 48 | 33 | 0.4372 | no |
+| `typos` | 84.0% | 0.6 pp [-0.2, 1.3] | 49 | 36 | 0.4372 | no |
+| `pasted_context_block` | 84.3% | 0.2 pp [-0.6, 0.9] | 46 | 42 | 0.7493 | no |
 
 ## The Cross-Model Signal
 
-- **`telegraphic_request`** is the through-line. It degrades every model:
-  significant after Bonferroni on both capable models (Haiku `p = 4.5e-5`,
-  GLM-4.6 `p = 1.9e-5`), and on the cheap model it is significant under FDR
-  control (`q = 0.022`) and borderline under the stricter Bonferroni threshold.
-  It is the only dimension significant on both capable models.
-- **`cursing`** is the secondary signal: significant under Bonferroni on nano
-  (`p = 0.0022`) and GLM-4.6 (`p = 0.0032`), and borderline on Haiku
-  (`p = 0.0079`, just above the corrected threshold). Profanity shifts routing
-  even though it carries no task information.
+- **`telegraphic_request`** is the largest cross-model effect. Its adjusted
+  p-values are `0.0465`, `0.00031`, and `0.00014`, with 95% CIs excluding zero
+  on nano, Haiku, and GLM respectively.
+- **`cursing`** is the secondary signal. Its adjusted p-values are `0.0130`,
+  `0.0475`, and `0.0191`, again with 95% CIs excluding zero on all three models.
+  The Haiku decision is close to the threshold and should be interpreted as a
+  small effect, not evidence of a broad collapse.
 - **`pasted_context_block`** is the instructive reversal. It is the largest and
-  most significant degradation on the cheap model (`p = 0.00026`, drop 1.9 pp),
+  most significant degradation on the cheap model (1.9 pp, 95% CI [0.9, 2.9],
+  Holm-adjusted `p = 0.0018`),
   but a near-perfect coin flip on both capable models (Haiku 26 vs. 24,
   `p = 0.89`; GLM 46 vs. 42, `p = 0.75`). It is a cheap-model fragility that
   capability eliminates. It also shows why the paired test matters: a
   one-directional regression count would have overstated this dimension.
 
-The shape across capability: the cheap model is broadly fragile. Pasted context,
-profanity, terseness, and irrelevant context all register. Capable models drop
-almost all of that, but not terseness.
+The shape across capability: the cheap model has three Holm-significant cells;
+the capable models retain the two phrasing-register effects, terseness and
+profanity. Most other intervals include zero after paired resampling.
 
 ## Artifact Screen
 
@@ -226,8 +231,8 @@ Some concrete inspectable failures:
    to telegraphic shorthand that the clean benchmark cannot see.
 2. Capability buys real robustness at the dimension level: most perturbations
    that hurt the cheap model do nothing detectable to the capable ones. But it
-   does not buy robustness to terse phrasing, and aggregate drop is not monotonic
-   in clean accuracy.
+   does not fully buy robustness to terse or profane phrasing, and aggregate drop
+   is not monotonic in clean accuracy.
 3. The mechanism in the failing examples is frequently **list compression**:
    terse phrasing of a multi-item request (`price a 2 GB and a 4 GB machine` to
    `2gb 4gb price`) leads the model to fire one tool call instead of two, or to
@@ -240,8 +245,9 @@ Some concrete inspectable failures:
   agentic benchmark.
 - Capability does not uniformly reduce degradation; the aggregate effect is not
   a clean gradient.
-- Per-dimension McNemar counts are still reported raw because they are the
-  correct paired statistical test over all paired flips. The artifact screen
+- Per-dimension discordant counts are reported raw and feed exact McNemar tests;
+  published decisions use Holm-adjusted p-values and paired bootstrap CIs. The
+  artifact screen
   above is a separate credibility check on the significant cells. It reduces
   both directions substantially. Under the symmetric screened test,
   `telegraphic_request` remains Bonferroni-significant for both capable models;
@@ -262,13 +268,15 @@ Some concrete inspectable failures:
   metadata and cache fingerprints, but not repeated as a column in
   `clean_to_noisy_failures.csv`.
 - Per-model paired statistics and McNemar outputs are written under
-  `artifacts/analysis/article/`.
+  `artifacts/analysis/article/`; the current inferential table is
+  `artifacts/analysis/significance.csv`.
 
 Key artifacts:
 
 ```text
 artifacts/analysis/article/paired_stats.csv
 artifacts/analysis/article/model_comparison.csv
+artifacts/analysis/significance.csv
 artifacts/analysis/article/clean_to_noisy_failures.csv
 artifacts/analysis/article/clean_to_noisy_failures_summary.csv
 artifacts/analysis/article/significant_cell_review_summary.csv

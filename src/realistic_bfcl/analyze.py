@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import math
 import re
 import statistics
 from collections import defaultdict
@@ -21,18 +20,15 @@ from .common import (
     write_jsonl,
 )
 from .evaluate import generated_dimensions
+from .stats import (
+    ARTICLE_SIGNIFICANCE_DIMENSIONS,
+    exact_mcnemar,
+    write_significance_csv,
+)
 
 ARTICLE_PRIMARY_MODEL = article_primary_model()
 
-ARTICLE_DIMENSIONS = {
-    "typos",
-    "cursing",
-    "irrelevant_context",
-    "removed_spaces",
-    "argumentative_challenge",
-    "pasted_context_block",
-    "telegraphic_request",
-}
+ARTICLE_DIMENSIONS = ARTICLE_SIGNIFICANCE_DIMENSIONS
 
 
 def call_names(calls: object) -> list[str]:
@@ -929,21 +925,10 @@ def mcnemar_exact_p_value(
     clean_success_noisy_failure: int,
     clean_failure_noisy_success: int,
 ) -> float:
-    discordant = clean_success_noisy_failure + clean_failure_noisy_success
-    if discordant == 0:
-        return 1.0
-    smaller = min(clean_success_noisy_failure, clean_failure_noisy_success)
-    log_half = math.log(0.5)
-    lower_tail = math.fsum(
-        math.exp(
-            math.lgamma(discordant + 1)
-            - math.lgamma(index + 1)
-            - math.lgamma(discordant - index + 1)
-            + discordant * log_half
-        )
-        for index in range(smaller + 1)
+    return exact_mcnemar(
+        clean_success_noisy_failure,
+        clean_failure_noisy_success,
     )
-    return min(1.0, 2 * lower_tail)
 
 
 def paired_stats_rows(dimensions: list[str]) -> list[dict[str, object]]:
@@ -1685,6 +1670,7 @@ def analyze() -> None:
     benchmark_summary_csv_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.csv"
     benchmark_summary_json_path = REPO_ROOT / "artifacts/analysis/benchmark_summary.json"
     model_comparison_path = REPO_ROOT / "artifacts/analysis/model_comparison.csv"
+    significance_path = REPO_ROOT / "artifacts/analysis/significance.csv"
     write_csv(
         flip_review_path,
         flip_rows,
@@ -1821,6 +1807,7 @@ def analyze() -> None:
             "reviewed_failure_type_taxonomy",
         ],
     )
+    write_significance_csv(model_comparison, significance_path)
     write_json(
         benchmark_summary_json_path,
         {
@@ -1847,6 +1834,7 @@ def analyze() -> None:
             "benchmark_summary_csv": benchmark_summary_csv_path.relative_to(REPO_ROOT).as_posix(),
             "benchmark_summary_json": benchmark_summary_json_path.relative_to(REPO_ROOT).as_posix(),
             "model_comparison_csv": model_comparison_path.relative_to(REPO_ROOT).as_posix(),
+            "significance_csv": significance_path.relative_to(REPO_ROOT).as_posix(),
             "flip_review_csv": flip_review_path.relative_to(REPO_ROOT).as_posix(),
             "regression_review_csv": regression_review_path.relative_to(REPO_ROOT).as_posix(),
             "strong_failure_examples_csv": strong_failure_examples_path.relative_to(
@@ -1864,6 +1852,7 @@ def analyze() -> None:
     print(f"Wrote {benchmark_summary_csv_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {benchmark_summary_json_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {model_comparison_path.relative_to(REPO_ROOT)}")
+    print(f"Wrote {significance_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {flip_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {regression_review_path.relative_to(REPO_ROOT)}")
     print(f"Wrote {strong_failure_examples_path.relative_to(REPO_ROOT)}")
