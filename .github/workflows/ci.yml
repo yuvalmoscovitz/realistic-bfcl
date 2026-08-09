@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -37,6 +38,7 @@ jobs:
         run: make lint
 
       - name: Type check maintained core
+        if: matrix.python-version == '3.11'
         run: make typecheck
 
       - name: Test
