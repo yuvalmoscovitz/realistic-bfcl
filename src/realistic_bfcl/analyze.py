@@ -3,12 +3,13 @@ from __future__ import annotations
 import csv
 import json
 import re
-import statistics
 from collections import defaultdict
+from pathlib import Path
 
 from .common import (
     DIMENSION_FILES,
     REPO_ROOT,
+    ModelRun,
     article_primary_model,
     compact_text,
     configured_model_runs,
@@ -19,7 +20,7 @@ from .common import (
     write_json,
     write_jsonl,
 )
-from .evaluate import generated_dimensions
+from .run_manifest import load_validated_manifest
 from .stats import (
     ARTICLE_SIGNIFICANCE_DIMENSIONS,
     exact_mcnemar,
@@ -858,14 +859,16 @@ def benchmark_summary_rows(
     return rows
 
 
-def model_comparison_rows(dimensions: list[str]) -> list[dict[str, object]]:
+def model_comparison_rows(
+    dimensions: list[str], models: list[ModelRun] | None = None
+) -> list[dict[str, object]]:
     labels = article_review_labels()
     clean_examples = {
         row["id"]: row
         for row in read_jsonl(REPO_ROOT / "artifacts/frozen/clean_subset.jsonl")
     }
     rows = []
-    for model in configured_model_runs():
+    for model in models or configured_model_runs():
         for dimension in dimensions:
             summary_path = (
                 REPO_ROOT / f"artifacts/results/paired/{dimension}/{model.filename}_summary.json"
@@ -987,103 +990,6 @@ def add_multiple_comparison_adjustments(
         row["benjamini_hochberg_q_value"] = min(1.0, running_q)
 
     return rows
-
-
-def paired_summary_path(dimension: str, suffix: str) -> object:
-    result_dir = REPO_ROOT / f"artifacts/results/paired/{dimension}"
-    if suffix:
-        result_dir = result_dir / suffix
-    return result_dir / f"{ARTICLE_PRIMARY_MODEL.filename}_summary.json"
-
-
-def complete_repeat_runs(dimensions: list[str]) -> list[tuple[str, str]]:
-    runs = [("run_1", "")]
-    clean_results_dir = REPO_ROOT / "artifacts/results/clean"
-    if not clean_results_dir.exists():
-        return runs
-
-    for path in sorted(clean_results_dir.iterdir()):
-        if not path.is_dir():
-            continue
-        suffix = path.name
-        if not (path / f"{ARTICLE_PRIMARY_MODEL.filename}_predictions.jsonl").exists():
-            continue
-        if all(paired_summary_path(dimension, suffix).exists() for dimension in dimensions):
-            runs.append((suffix, suffix))
-    return runs
-
-
-def stability_repeat_run_rows(dimensions: list[str]) -> list[dict[str, object]]:
-    rows = []
-    for run_name, suffix in complete_repeat_runs(dimensions):
-        for dimension in dimensions:
-            summary = json.loads(
-                paired_summary_path(dimension, suffix).read_text(encoding="utf-8")
-            )
-            metrics = summary["metrics"]
-            rows.append(
-                {
-                    "run": run_name,
-                    "dimension": dimension,
-                    "total": metrics["total"],
-                    "clean_accuracy": metrics["clean_accuracy"],
-                    "noisy_accuracy": metrics["noisy_accuracy"],
-                    "absolute_degradation": metrics["absolute_degradation"],
-                    "clean_success_noisy_failure": metrics[
-                        "clean_success_noisy_failure"
-                    ],
-                    "clean_failure_noisy_success": metrics[
-                        "clean_failure_noisy_success"
-                    ],
-                    "both_correct": metrics["both_correct"],
-                    "both_wrong": metrics["both_wrong"],
-                }
-            )
-    return rows
-
-
-def stability_repeat_summary_rows(
-    run_rows: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    summary_rows = []
-    dimensions = sorted({str(row["dimension"]) for row in run_rows})
-    for dimension in dimensions:
-        dimension_rows = [row for row in run_rows if row["dimension"] == dimension]
-        if len(dimension_rows) < 2:
-            continue
-        drops = [float(row["absolute_degradation"]) for row in dimension_rows]
-        clean_accuracies = [float(row["clean_accuracy"]) for row in dimension_rows]
-        noisy_accuracies = [float(row["noisy_accuracy"]) for row in dimension_rows]
-        regressions = [
-            int(row["clean_success_noisy_failure"]) for row in dimension_rows
-        ]
-        recoveries = [
-            int(row["clean_failure_noisy_success"]) for row in dimension_rows
-        ]
-        summary_rows.append(
-            {
-                "dimension": dimension,
-                "runs": len(dimension_rows),
-                "mean_clean_accuracy": statistics.mean(clean_accuracies),
-                "min_clean_accuracy": min(clean_accuracies),
-                "max_clean_accuracy": max(clean_accuracies),
-                "mean_noisy_accuracy": statistics.mean(noisy_accuracies),
-                "min_noisy_accuracy": min(noisy_accuracies),
-                "max_noisy_accuracy": max(noisy_accuracies),
-                "mean_absolute_degradation": statistics.mean(drops),
-                "min_absolute_degradation": min(drops),
-                "max_absolute_degradation": max(drops),
-                "drop_range": max(drops) - min(drops),
-                "drop_sample_stdev": statistics.stdev(drops),
-                "mean_clean_success_noisy_failure": statistics.mean(regressions),
-                "min_clean_success_noisy_failure": min(regressions),
-                "max_clean_success_noisy_failure": max(regressions),
-                "mean_clean_failure_noisy_success": statistics.mean(recoveries),
-                "min_clean_failure_noisy_success": min(recoveries),
-                "max_clean_failure_noisy_success": max(recoveries),
-            }
-        )
-    return summary_rows
 
 
 def review_filtering_rows(
@@ -1335,11 +1241,6 @@ def write_article_bundle(
     dimension_rows = article_dimension_rows(benchmark_rows, regression_rows, labels)
     paired_rows = paired_stats_rows(article_dimensions)
     filtering_rows = review_filtering_rows(benchmark_rows, regression_rows, labels)
-    stability_run_rows = stability_repeat_run_rows(article_dimensions)
-    stability_summary_rows = sorted(
-        stability_repeat_summary_rows(stability_run_rows),
-        key=lambda row: -float(row["mean_absolute_degradation"]),
-    )
     dimension_fieldnames = [
         "dimension",
         "total",
@@ -1388,59 +1289,6 @@ def write_article_bundle(
             "article_regression_count",
         ],
     )
-    stability_run_fieldnames = [
-        "run",
-        "dimension",
-        "total",
-        "clean_accuracy",
-        "noisy_accuracy",
-        "absolute_degradation",
-        "clean_success_noisy_failure",
-        "clean_failure_noisy_success",
-        "both_correct",
-        "both_wrong",
-    ]
-    stability_summary_fieldnames = [
-        "dimension",
-        "runs",
-        "mean_clean_accuracy",
-        "min_clean_accuracy",
-        "max_clean_accuracy",
-        "mean_noisy_accuracy",
-        "min_noisy_accuracy",
-        "max_noisy_accuracy",
-        "mean_absolute_degradation",
-        "min_absolute_degradation",
-        "max_absolute_degradation",
-        "drop_range",
-        "drop_sample_stdev",
-        "mean_clean_success_noisy_failure",
-        "min_clean_success_noisy_failure",
-        "max_clean_success_noisy_failure",
-        "mean_clean_failure_noisy_success",
-        "min_clean_failure_noisy_success",
-        "max_clean_failure_noisy_success",
-    ]
-    if stability_summary_rows:
-        write_csv(
-            article_dir / "stability_repeat_runs.csv",
-            stability_run_rows,
-            stability_run_fieldnames,
-        )
-        write_csv(
-            article_dir / "stability_repeat_summary.csv",
-            stability_summary_rows,
-            stability_summary_fieldnames,
-        )
-        write_json(
-            article_dir / "stability_repeat_summary.json",
-            {
-                "model": ARTICLE_PRIMARY_MODEL.id,
-                "runs": sorted({str(row["run"]) for row in stability_run_rows}),
-                "dimensions": stability_summary_rows,
-            },
-        )
-
     error_type_rows = grouped_article_count_rows(
         regression_rows, "manual_error_type", labels
     )
@@ -1569,35 +1417,6 @@ def write_article_bundle(
                 rate=float(row["article_regression_rate_given_clean_success"]),
             )
         )
-    if stability_summary_rows:
-        summary_lines.extend(
-            [
-                "",
-                "## Repeat-Run Stability",
-                "",
-                (
-                    "The evaluation was repeated three times with fresh clean and noisy "
-                    "model calls. Every listed noise type degraded accuracy in every run."
-                ),
-                "",
-                "| Dimension | Runs | Mean drop | Min drop | Max drop | Drop sd |",
-                "|---|---:|---:|---:|---:|---:|",
-            ]
-        )
-        for row in stability_summary_rows:
-            summary_lines.append(
-                (
-                    "| {dimension} | {runs} | {mean:.3f} | {min_drop:.3f} "
-                    "| {max_drop:.3f} | {stdev:.3f} |"
-                ).format(
-                    dimension=row["dimension"],
-                    runs=row["runs"],
-                    mean=float(row["mean_absolute_degradation"]),
-                    min_drop=float(row["min_absolute_degradation"]),
-                    max_drop=float(row["max_absolute_degradation"]),
-                    stdev=float(row["drop_sample_stdev"]),
-                )
-            )
     summary_lines.extend(
         [
             "",
@@ -1609,15 +1428,6 @@ def write_article_bundle(
                 "p-values, and multiple-comparison corrections."
             ),
             "- `review_filtering.csv`: raw-to-reviewed regression filtering counts.",
-            (
-                "- `stability_repeat_summary.csv`: mean/range across repeated "
-                "fresh model runs."
-            ),
-            (
-                "- `stability_repeat_runs.csv`: per-run paired metrics used by the "
-                "stability summary."
-            ),
-            "- `stability_repeat_summary.json`: JSON form of the stability summary.",
             "- `error_type_counts.csv`: article regressions by manual error type.",
             "- `overall_error_type_counts.csv`: aggregate article regressions by error type.",
             "- `category_counts.csv`: article regressions by BFCL category.",
@@ -1640,20 +1450,18 @@ def write_article_bundle(
     )
 
 
-def analyze() -> None:
-    dimensions = [
-        dimension
-        for dimension in generated_dimensions()
-        if (
-            REPO_ROOT
-            / (
-                f"artifacts/results/paired/{dimension}/"
-                f"{ARTICLE_PRIMARY_MODEL.filename}_paired.jsonl"
-            )
-        ).exists()
-    ]
+def analyze(run_manifest: Path | None = None) -> None:
+    manifest = load_validated_manifest(run_manifest)
+    model_records = manifest["models"]
+    model_ids = [str(record["id"]) for record in model_records]
+    if ARTICLE_PRIMARY_MODEL.id not in model_ids:
+        raise SystemExit(
+            f"Run manifest does not include article-primary model {ARTICLE_PRIMARY_MODEL.id}."
+        )
+    models = configured_model_runs(model_ids)
+    dimensions = list(manifest["frozen_dataset"]["dimensions"])
     if not dimensions:
-        raise SystemExit("No paired results found. Run run-bfcl first.")
+        raise SystemExit("Run manifest does not contain any evaluated dimensions.")
     summaries = [analyze_dimension(dimension) for dimension in dimensions]
     flip_rows = []
     for dimension in dimensions:
@@ -1784,7 +1592,7 @@ def analyze() -> None:
     ]
     write_csv(benchmark_summary_csv_path, benchmark_rows, benchmark_fieldnames)
     model_comparison = model_comparison_rows(
-        [dimension for dimension in dimensions if dimension in ARTICLE_DIMENSIONS]
+        [dimension for dimension in dimensions if dimension in ARTICLE_DIMENSIONS], models
     )
     write_csv(
         model_comparison_path,
