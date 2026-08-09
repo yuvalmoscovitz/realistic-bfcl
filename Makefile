@@ -1,4 +1,4 @@
-.PHONY: status lint prepare-subset augment run-bfcl analyze
+.PHONY: status lint typecheck prepare-subset augment run-bfcl analyze
 
 PYTHON ?= python
 RUN_STAGE = $(PYTHON) scripts/run_stage.py
@@ -8,6 +8,9 @@ status:
 
 lint:
 	$(PYTHON) -m ruff check .
+
+typecheck:
+	$(PYTHON) -m mypy --follow-imports=skip src/realistic_bfcl/pipeline.py scripts/run_stage.py
 
 prepare-subset:
 	$(RUN_STAGE) prepare-subset
