@@ -83,7 +83,7 @@ manual review before promotion into the main augmented dataset.
 Command:
 
 ```bash
-python scripts/run_stage.py run-bfcl
+python scripts/run_stage.py run-bfcl --models nano,haiku,glm
 ```
 
 Purpose:
@@ -102,7 +102,8 @@ Primary outputs:
 Command:
 
 ```bash
-python scripts/run_stage.py analyze
+python scripts/run_stage.py analyze \
+  --run-manifest artifacts/<run_id>/manifest.json
 ```
 
 Purpose:

@@ -6,7 +6,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -95,14 +95,25 @@ DIMENSION_FILES = {
 }
 
 
+def load_yaml_mapping(path: Path) -> dict[str, object]:
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as error:
+        raise SystemExit(f"Could not read YAML config {path}: {error}") from error
+    if not isinstance(payload, dict):
+        raise SystemExit(f"YAML config must contain a mapping: {path}")
+    return payload
+
+
 def realism_dimension_configs() -> dict[str, dict[str, object]]:
     path = REPO_ROOT / "configs/realism_dimensions.yaml"
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or not isinstance(payload.get("dimensions"), dict):
+    payload = load_yaml_mapping(path)
+    raw_dimensions = payload.get("dimensions")
+    if not isinstance(raw_dimensions, dict):
         raise ValueError(f"Invalid realism dimension config: {path}")
 
     dimensions: dict[str, dict[str, object]] = {}
-    for name, raw_config in payload["dimensions"].items():
+    for name, raw_config in raw_dimensions.items():
         if not isinstance(name, str) or not isinstance(raw_config, dict):
             raise ValueError(f"Invalid realism dimension entry in {path}")
         config = dict(raw_config)
@@ -166,35 +177,23 @@ def stable_hash(payload: object) -> str:
 
 
 def read_int_setting(path: Path, key: str) -> int:
-    prefix = f"{key}:"
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip().startswith(prefix):
-            return int(line.split(":", 1)[1].strip())
-    raise SystemExit(f"Missing required setting '{key}' in {path.relative_to(REPO_ROOT)}")
+    subset = load_yaml_mapping(path).get("subset")
+    if not isinstance(subset, dict) or key not in subset:
+        raise SystemExit(f"Missing required subset setting '{key}' in {path}")
+    value = subset[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise SystemExit(f"Subset setting '{key}' must be a positive integer in {path}")
+    return value
 
 
 def read_list_setting(path: Path, key: str) -> list[str]:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    values: list[str] = []
-    in_block = False
-    prefix = f"{key}:"
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith(prefix):
-            after_colon = stripped.split(":", 1)[1].strip()
-            if after_colon == "[]":
-                return []
-            in_block = True
-            continue
-        if in_block:
-            if stripped.startswith("- "):
-                values.append(stripped[2:].strip())
-                continue
-            if stripped and not line.startswith(" "):
-                break
-
-    return values
+    subset = load_yaml_mapping(path).get("subset")
+    if not isinstance(subset, dict) or key not in subset:
+        raise SystemExit(f"Missing required subset setting '{key}' in {path}")
+    value = subset[key]
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise SystemExit(f"Subset setting '{key}' must be a list of strings in {path}")
+    return value
 
 
 def safe_model_filename(model_id: str) -> str:
@@ -204,6 +203,8 @@ def safe_model_filename(model_id: str) -> str:
 def _optional_float(value: object, field: str, model_name: str) -> float | None:
     if value is None:
         return None
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        raise SystemExit(f"Model '{model_name}' has invalid {field}: {value!r}.")
     try:
         return float(value)
     except (TypeError, ValueError) as error:
@@ -251,11 +252,8 @@ def _model_from_config(row: object) -> ModelRun:
 
 def model_registry(path: Path | None = None) -> list[ModelRun]:
     config_path = path or REPO_ROOT / "configs/models.yaml"
-    try:
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
-        raise SystemExit(f"Could not read model registry {config_path}: {error}") from error
-    rows = payload.get("models") if isinstance(payload, dict) else None
+    payload = load_yaml_mapping(config_path)
+    rows = payload.get("models")
     if not isinstance(rows, list) or not rows:
         raise SystemExit("configs/models.yaml must contain a non-empty 'models' list.")
     models = [_model_from_config(row) for row in rows]
@@ -487,7 +485,7 @@ def optional_positive_int_env(name: str) -> int | None:
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def compact_text(value: object) -> str:

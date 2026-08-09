@@ -30,6 +30,24 @@ SIGNIFICANCE_FIELDS = [
 ARTICLE_SIGNIFICANCE_DIMENSIONS = article_facing_dimensions()
 
 
+def integer_field(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, str | int):
+        raise ValueError(f"{field} must be an integer.")
+    try:
+        return int(value)
+    except ValueError as error:
+        raise ValueError(f"{field} must be an integer.") from error
+
+
+def float_field(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        raise ValueError(f"{field} must be numeric.")
+    try:
+        return float(value)
+    except ValueError as error:
+        raise ValueError(f"{field} must be numeric.") from error
+
+
 def exact_mcnemar(b: int, c: int) -> float:
     if b < 0 or c < 0:
         raise ValueError("McNemar counts must be non-negative.")
@@ -96,7 +114,7 @@ def percentile_bootstrap_ci(
         raise ValueError("chunk_size must be positive.")
 
     rng = np.random.default_rng(seed)
-    estimates = np.empty(n_resamples, dtype=np.float64)
+    estimates: np.ndarray = np.empty(n_resamples, dtype=np.float64)
     completed = 0
     while completed < n_resamples:
         current_size = min(chunk_size, n_resamples - completed)
@@ -111,8 +129,100 @@ def percentile_bootstrap_ci(
         completed += current_size
 
     tail = (1.0 - confidence) / 2.0
-    low, high = np.quantile(estimates, [tail, 1.0 - tail], method="linear")
-    return float(low), float(high)
+    interval = np.asarray(
+        np.quantile(estimates, [tail, 1.0 - tail], method="linear")
+    )
+    return float(interval[0]), float(interval[1])
+
+
+def group_comparison_rows(
+    comparison_rows: list[dict[str, object]],
+) -> dict[str, list[dict[str, object]]]:
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    seen: set[tuple[str, str]] = set()
+    for row in comparison_rows:
+        model = str(row["model"])
+        dimension = str(row["dimension"])
+        key = (model, dimension)
+        if key in seen:
+            raise ValueError(f"Duplicate model/dimension row: {model}/{dimension}.")
+        seen.add(key)
+        grouped[model].append(row)
+    return grouped
+
+
+def validate_significance_families(
+    grouped: dict[str, list[dict[str, object]]],
+    expected_dimensions: frozenset[str] | None,
+) -> None:
+    if expected_dimensions is None:
+        return
+    for model, model_rows in grouped.items():
+        actual = {str(row["dimension"]) for row in model_rows}
+        missing = sorted(expected_dimensions - actual)
+        unexpected = sorted(actual - expected_dimensions)
+        if not missing and not unexpected:
+            continue
+        details = []
+        if missing:
+            details.append(f"missing={','.join(missing)}")
+        if unexpected:
+            details.append(f"unexpected={','.join(unexpected)}")
+        raise ValueError(f"Incomplete significance family for {model}: {'; '.join(details)}.")
+
+
+def significance_cell(
+    model: str,
+    row: dict[str, object],
+    *,
+    n_resamples: int,
+    confidence: float,
+    seed: int,
+) -> dict[str, object]:
+    dimension = str(row["dimension"])
+    n_pairs = integer_field(row["total"], "total")
+    b = integer_field(row["clean_success_noisy_failure"], "clean_success_noisy_failure")
+    c = integer_field(row["clean_failure_noisy_success"], "clean_failure_noisy_success")
+    ci_low, ci_high = percentile_bootstrap_ci(
+        paired_differences_from_counts(n_pairs, b, c),
+        n_resamples=n_resamples,
+        confidence=confidence,
+        seed=seed,
+    )
+    clean_acc = float_field(row["clean_accuracy"], "clean_accuracy")
+    noisy_acc = float_field(row["noisy_accuracy"], "noisy_accuracy")
+    degradation = float_field(row["absolute_degradation"], "absolute_degradation")
+    clean_correct = round(clean_acc * n_pairs)
+    noisy_correct = clean_correct - b + c
+    tolerance = max(1e-6, 0.5 / n_pairs + 1e-12)
+    if b > clean_correct or c > n_pairs - clean_correct:
+        raise ValueError(f"Infeasible contingency counts for {model}/{dimension}.")
+    derived_clean_acc = clean_correct / n_pairs
+    derived_noisy_acc = noisy_correct / n_pairs
+    derived_degradation = (b - c) / n_pairs
+    comparisons = (
+        (clean_acc, derived_clean_acc, "clean_accuracy"),
+        (noisy_acc, derived_noisy_acc, "noisy_accuracy"),
+        (degradation, derived_degradation, "absolute_degradation"),
+        (clean_acc - noisy_acc, derived_degradation, "absolute_degradation"),
+    )
+    for observed, derived, label in comparisons:
+        if abs(observed - derived) > tolerance:
+            raise ValueError(f"{label} disagrees with counts for {model}/{dimension}.")
+    return {
+        "model": model,
+        "dimension": dimension,
+        "n_pairs": n_pairs,
+        "clean_acc": derived_clean_acc,
+        "noisy_acc": derived_noisy_acc,
+        "degradation": derived_degradation,
+        "b": b,
+        "c": c,
+        "n_discordant": b + c,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "p_value": exact_mcnemar(b, c),
+    }
 
 
 def significance_rows_from_comparison(
@@ -129,99 +239,31 @@ def significance_rows_from_comparison(
     if not 0.0 < alpha < 1.0:
         raise ValueError("alpha must be between 0 and 1.")
 
-    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
-    seen: set[tuple[str, str]] = set()
-    for row in comparison_rows:
-        model = str(row["model"])
-        dimension = str(row["dimension"])
-        key = (model, dimension)
-        if key in seen:
-            raise ValueError(f"Duplicate model/dimension row: {model}/{dimension}.")
-        seen.add(key)
-        grouped[model].append(row)
+    grouped = group_comparison_rows(comparison_rows)
+    validate_significance_families(grouped, expected_dimensions)
 
-    if expected_dimensions is not None:
-        for model, model_rows in grouped.items():
-            actual_dimensions = {str(row["dimension"]) for row in model_rows}
-            if actual_dimensions != expected_dimensions:
-                missing = sorted(expected_dimensions - actual_dimensions)
-                unexpected = sorted(actual_dimensions - expected_dimensions)
-                details = []
-                if missing:
-                    details.append(f"missing={','.join(missing)}")
-                if unexpected:
-                    details.append(f"unexpected={','.join(unexpected)}")
-                raise ValueError(
-                    f"Incomplete significance family for {model}: {'; '.join(details)}."
-                )
-
-    pair_counts = {int(row["total"]) for row in comparison_rows}
+    pair_counts = {integer_field(row["total"], "total") for row in comparison_rows}
     if len(pair_counts) != 1:
         raise ValueError("All significance cells must use the same number of pairs.")
 
     output = []
     for model in sorted(grouped):
         model_rows = sorted(grouped[model], key=lambda row: str(row["dimension"]))
-        raw_rows = []
-        for dimension_index, row in enumerate(model_rows):
-            n_pairs = int(row["total"])
-            b = int(row["clean_success_noisy_failure"])
-            c = int(row["clean_failure_noisy_success"])
-            differences = paired_differences_from_counts(n_pairs, b, c)
-            ci_low, ci_high = percentile_bootstrap_ci(
-                differences,
+        raw_rows = [
+            significance_cell(
+                model,
+                row,
                 n_resamples=n_resamples,
                 confidence=confidence,
                 seed=seed + dimension_index,
             )
-            clean_acc = float(row["clean_accuracy"])
-            noisy_acc = float(row["noisy_accuracy"])
-            degradation = float(row["absolute_degradation"])
-            clean_correct = round(clean_acc * n_pairs)
-            noisy_correct = clean_correct - b + c
-            tolerance = max(1e-6, 0.5 / n_pairs + 1e-12)
-            if b > clean_correct or c > n_pairs - clean_correct:
-                raise ValueError(
-                    f"Infeasible contingency counts for {model}/{row['dimension']}."
-                )
-            derived_clean_acc = clean_correct / n_pairs
-            derived_noisy_acc = noisy_correct / n_pairs
-            derived_degradation = (b - c) / n_pairs
-            if abs(clean_acc - derived_clean_acc) > tolerance:
-                raise ValueError(
-                    f"clean_accuracy disagrees with counts for {model}/{row['dimension']}."
-                )
-            if abs(noisy_acc - derived_noisy_acc) > tolerance:
-                raise ValueError(
-                    f"noisy_accuracy disagrees with counts for {model}/{row['dimension']}."
-                )
-            if (
-                abs(degradation - derived_degradation) > tolerance
-                or abs((clean_acc - noisy_acc) - derived_degradation) > tolerance
-            ):
-                raise ValueError(
-                    f"absolute_degradation disagrees with counts for "
-                    f"{model}/{row['dimension']}."
-                )
-            raw_rows.append(
-                {
-                    "model": model,
-                    "dimension": str(row["dimension"]),
-                    "n_pairs": n_pairs,
-                    "clean_acc": derived_clean_acc,
-                    "noisy_acc": derived_noisy_acc,
-                    "degradation": derived_degradation,
-                    "b": b,
-                    "c": c,
-                    "n_discordant": b + c,
-                    "ci_low": ci_low,
-                    "ci_high": ci_high,
-                    "p_value": exact_mcnemar(b, c),
-                }
-            )
+            for dimension_index, row in enumerate(model_rows)
+        ]
 
-        adjusted = holm_bonferroni([float(row["p_value"]) for row in raw_rows])
-        for row, p_adjusted in zip(raw_rows, adjusted):
+        adjusted = holm_bonferroni(
+            [float_field(row["p_value"], "p_value") for row in raw_rows]
+        )
+        for row, p_adjusted in zip(raw_rows, adjusted, strict=True):
             row["p_adjusted"] = p_adjusted
             row["significant"] = p_adjusted <= alpha
             output.append(row)

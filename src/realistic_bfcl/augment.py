@@ -5,6 +5,8 @@ import json
 import os
 import re
 from collections import Counter
+from collections.abc import Callable
+from functools import partial
 
 from .common import (
     DIMENSION_FILES,
@@ -631,7 +633,9 @@ def telegraphic_request_prompt(
     return noisy_prompt
 
 
-def transform_messages(question: object, index: int, transform: object) -> object:
+def transform_messages(
+    question: object, index: int, transform: Callable[[str, int], str]
+) -> object:
     conversations = json.loads(json.dumps(question))
     first_message = conversations[0][0]
     first_message["content"] = transform(str(first_message["content"]), index)
@@ -678,29 +682,61 @@ def validate_augmented_prompt(
 ) -> list[str]:
     reasons = []
     if allow_verbatim_wrapper_noise:
-        if verbatim_source_text and compact_text(verbatim_source_text) not in compact_text(
-            noisy_prompt
-        ):
-            reasons.append("clean wrapped message is not preserved inside noisy prompt")
-        missing_numbers = Counter(numeric_tokens(clean_prompt)) - Counter(
-            numeric_tokens(noisy_prompt)
+        reasons.extend(
+            wrapper_validation_errors(clean_prompt, noisy_prompt, verbatim_source_text)
         )
-        for number in missing_numbers.elements():
-            reasons.append(f"clean numeric token missing from noisy prompt: {number!r}")
-        for quoted in quoted_literals(clean_prompt):
-            if quoted not in noisy_prompt:
-                reasons.append(f"clean quoted literal missing from noisy prompt: {quoted!r}")
     else:
-        clean_numbers = numeric_tokens(clean_prompt)
-        noisy_numbers = numeric_tokens(noisy_prompt)
-        if clean_numbers != noisy_numbers:
-            reasons.append(f"numeric tokens changed from {clean_numbers!r} to {noisy_numbers!r}")
+        reasons.extend(surface_validation_errors(clean_prompt, noisy_prompt))
+    reasons.extend(
+        gold_literal_validation_errors(
+            example, clean_prompt, noisy_prompt, allow_verbatim_wrapper_noise
+        )
+    )
+    return reasons
 
-        clean_quotes = quoted_literals(clean_prompt)
-        noisy_quotes = quoted_literals(noisy_prompt)
-        if clean_quotes != noisy_quotes:
-            reasons.append(f"quoted literals changed from {clean_quotes!r} to {noisy_quotes!r}")
 
+def wrapper_validation_errors(
+    clean_prompt: str, noisy_prompt: str, verbatim_source_text: str | None
+) -> list[str]:
+    reasons = []
+    if (
+        verbatim_source_text
+        and compact_text(verbatim_source_text) not in compact_text(noisy_prompt)
+    ):
+        reasons.append("clean wrapped message is not preserved inside noisy prompt")
+    missing_numbers = Counter(numeric_tokens(clean_prompt)) - Counter(numeric_tokens(noisy_prompt))
+    reasons.extend(
+        f"clean numeric token missing from noisy prompt: {number!r}"
+        for number in missing_numbers.elements()
+    )
+    reasons.extend(
+        f"clean quoted literal missing from noisy prompt: {quoted!r}"
+        for quoted in quoted_literals(clean_prompt)
+        if quoted not in noisy_prompt
+    )
+    return reasons
+
+
+def surface_validation_errors(clean_prompt: str, noisy_prompt: str) -> list[str]:
+    reasons = []
+    clean_numbers = numeric_tokens(clean_prompt)
+    noisy_numbers = numeric_tokens(noisy_prompt)
+    if clean_numbers != noisy_numbers:
+        reasons.append(f"numeric tokens changed from {clean_numbers!r} to {noisy_numbers!r}")
+    clean_quotes = quoted_literals(clean_prompt)
+    noisy_quotes = quoted_literals(noisy_prompt)
+    if clean_quotes != noisy_quotes:
+        reasons.append(f"quoted literals changed from {clean_quotes!r} to {noisy_quotes!r}")
+    return reasons
+
+
+def gold_literal_validation_errors(
+    example: dict[str, object],
+    clean_prompt: str,
+    noisy_prompt: str,
+    allow_verbatim_wrapper_noise: bool,
+) -> list[str]:
+    reasons = []
     for literal in primitive_gold_values(example["ground_truth"]):
         if not literal_visible_in_text(literal, clean_prompt):
             continue
@@ -713,7 +749,35 @@ def validate_augmented_prompt(
     return reasons
 
 
-def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
+def transformed_question(
+    example: dict[str, object],
+    dimension: str,
+    index: int,
+    transform: Callable[[str, int], str],
+) -> object:
+    if dimension not in {"typos", "removed_spaces", "telegraphic_request"}:
+        return transform_messages(example["question"], index, transform)
+
+    clean_first_message = str(example["question"][0][0]["content"])
+    protected_text = (
+        conversation_text(example["question"]) if dimension == "typos" else clean_first_message
+    )
+    protected = visible_gold_literal_spans(protected_text, example)
+    if dimension == "telegraphic_request":
+        protected.extend(quoted_literal_spans(clean_first_message))
+        protected_transform = partial(
+            telegraphic_request_prompt, protected_spans=protected
+        )
+    elif dimension == "removed_spaces":
+        protected_transform = partial(removed_spaces_prompt, protected_spans=protected)
+    else:
+        protected_transform = partial(typo_prompt, protected_spans=protected)
+    return transform_messages(example["question"], index, protected_transform)
+
+
+def augment_dimension(
+    dimension: str, suffix: str, transform: Callable[[str, int], str]
+) -> None:
     output_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
 
     rows = []
@@ -724,57 +788,7 @@ def augment_dimension(dimension: str, suffix: str, transform: object) -> None:
         print(f"Limiting augmentation to first {len(examples)} examples")
 
     for index, example in enumerate(examples):
-        if dimension == "typos":
-            clean_prompt = conversation_text(example["question"])
-            protected = visible_gold_literal_spans(clean_prompt, example)
-
-            def protected_typo_prompt(
-                prompt: str,
-                prompt_index: int,
-                protected_spans: list[tuple[int, int]] = protected,
-            ) -> str:
-                return typo_prompt(prompt, prompt_index, protected_spans)
-
-            question = transform_messages(
-                example["question"],
-                index,
-                protected_typo_prompt,
-            )
-        elif dimension == "removed_spaces":
-            clean_first_message = str(example["question"][0][0]["content"])
-            protected = visible_gold_literal_spans(clean_first_message, example)
-
-            def protected_removed_spaces_prompt(
-                prompt: str,
-                prompt_index: int,
-                protected_spans: list[tuple[int, int]] = protected,
-            ) -> str:
-                return removed_spaces_prompt(prompt, prompt_index, protected_spans)
-
-            question = transform_messages(
-                example["question"],
-                index,
-                protected_removed_spaces_prompt,
-            )
-        elif dimension == "telegraphic_request":
-            clean_first_message = str(example["question"][0][0]["content"])
-            protected = visible_gold_literal_spans(clean_first_message, example)
-            protected.extend(quoted_literal_spans(clean_first_message))
-
-            def protected_telegraphic_prompt(
-                prompt: str,
-                prompt_index: int,
-                protected_spans: list[tuple[int, int]] = protected,
-            ) -> str:
-                return telegraphic_request_prompt(prompt, prompt_index, protected_spans)
-
-            question = transform_messages(
-                example["question"],
-                index,
-                protected_telegraphic_prompt,
-            )
-        else:
-            question = transform_messages(example["question"], index, transform)
+        question = transformed_question(example, dimension, index, transform)
         clean_prompt = conversation_text(example["question"])
         noisy_prompt = conversation_text(question)
         allow_verbatim_wrapper_noise = dimension in VERBATIM_WRAPPER_DIMENSIONS

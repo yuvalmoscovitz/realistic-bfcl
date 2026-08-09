@@ -557,38 +557,35 @@ def call_llm_augmenter(example: dict[str, object], dimension: LlmDimension) -> d
     return parsed
 
 
-def validate_llm_messages(
-    example: dict[str, object],
-    messages: list[dict[str, str]],
-    dimension: LlmDimension,
+def preservation_validation_errors(
+    example: dict[str, object], clean_prompt: str, augmented_text: str
 ) -> list[str]:
-    clean_prompt = conversation_text(example["question"])
-    final_user_message = final_clean_user_message(example)
-    augmented_text = "\n".join(message["content"] for message in messages)
-    lowered_text = augmented_text.lower()
-    lowered_clean = clean_prompt.lower()
     reasons = []
-
     for number in numeric_tokens(clean_prompt):
         if number not in numeric_tokens(augmented_text):
             reasons.append(f"clean numeric token missing from augmentation: {number!r}")
-
     for quoted in protected_clean_quoted_literals(clean_prompt):
         bare_quoted = quoted.strip("'\"")
         if not literal_visible_in_text(bare_quoted, augmented_text):
             reasons.append(f"clean quoted literal missing from augmentation: {quoted!r}")
-
     for literal in primitive_gold_values(example["ground_truth"]):
         if literal_visible_in_text(literal, clean_prompt) and not literal_visible_in_text(
-            literal,
-            augmented_text,
+            literal, augmented_text
         ):
             reasons.append(f"visible gold literal missing from augmentation: {literal!r}")
-
+    lowered_text = augmented_text.lower()
+    lowered_clean = clean_prompt.lower()
     for term in PRESERVED_DIRECTIVE_TERMS:
         if term in lowered_clean and term not in lowered_text:
             reasons.append(f"clean directive term missing from augmentation: {term!r}")
+    reasons.extend(inactive_slot_validation_errors(example, clean_prompt, lowered_text))
+    return reasons
 
+
+def inactive_slot_validation_errors(
+    example: dict[str, object], clean_prompt: str, lowered_text: str
+) -> list[str]:
+    reasons = []
     for property_name, terms in forbidden_active_slot_terms(example, clean_prompt).items():
         for term in terms:
             if term.lower() in lowered_text:
@@ -596,6 +593,56 @@ def validate_llm_messages(
                     "augmentation introduced inactive schema slot term "
                     f"{term!r} for property {property_name!r}"
                 )
+    return reasons
+
+
+def distractor_context_validation_errors(
+    example: dict[str, object], clean_prompt: str, augmented_text: str, final_user_message: str
+) -> list[str]:
+    lowered_text = augmented_text.lower()
+    reasons = []
+    has_strong_tone = any(term in lowered_text for term in PROFANITY_TERMS) or any(
+        term in lowered_text for term in ARGUMENTATIVE_TONE_TERMS
+    )
+    if not has_strong_tone:
+        reasons.append(
+            "llm_frustrated_distractor_context must include profanity or strong skepticism"
+        )
+    if not any(marker in lowered_text for marker in INACTIVE_CONTEXT_MARKERS):
+        reasons.append(
+            "llm_frustrated_distractor_context must explicitly mark distractors inactive"
+        )
+    if final_user_message not in augmented_text:
+        return reasons
+    prefix_text = augmented_text.split(final_user_message, 1)[0]
+    lowered_prefix = prefix_text.lower()
+    reasons.extend(
+        "llm_frustrated_distractor_context prefix reused clean quoted literal: "
+        f"{quoted!r}"
+        for quoted in quoted_literals(clean_prompt)
+        if quoted.strip("'\"") and quoted.strip("'\"").lower() in lowered_prefix
+    )
+    reasons.extend(
+        "llm_frustrated_distractor_context prefix reused visible gold literal: "
+        f"{literal!r}"
+        for literal in primitive_gold_values(example["ground_truth"])
+        if isinstance(literal, str)
+        and literal_visible_in_text(literal, clean_prompt)
+        and literal_visible_in_text(literal, prefix_text)
+    )
+    return reasons
+
+
+def dimension_validation_errors(
+    example: dict[str, object],
+    messages: list[dict[str, str]],
+    dimension: LlmDimension,
+    clean_prompt: str,
+    augmented_text: str,
+    final_user_message: str,
+) -> list[str]:
+    reasons = []
+    lowered_text = augmented_text.lower()
 
     single_turn_dimensions = {
         "llm_profane_frustration",
@@ -612,38 +659,18 @@ def validate_llm_messages(
     ):
         reasons.append("llm_profane_frustration must include profanity")
     if dimension.name == "llm_frustrated_distractor_context":
-        has_strong_tone = any(term in lowered_text for term in PROFANITY_TERMS) or any(
-            term in lowered_text for term in ARGUMENTATIVE_TONE_TERMS
+        reasons.extend(
+            distractor_context_validation_errors(
+                example, clean_prompt, augmented_text, final_user_message
+            )
         )
-        if not has_strong_tone:
-            reasons.append(
-                "llm_frustrated_distractor_context must include profanity or strong skepticism"
-            )
-        if not any(marker in lowered_text for marker in INACTIVE_CONTEXT_MARKERS):
-            reasons.append(
-                "llm_frustrated_distractor_context must explicitly mark distractors inactive"
-            )
-        if final_user_message in augmented_text:
-            prefix_text = augmented_text.split(final_user_message, 1)[0]
-            lowered_prefix = prefix_text.lower()
-            for quoted in quoted_literals(clean_prompt):
-                bare_quoted = quoted.strip("'\"").lower()
-                if bare_quoted and bare_quoted in lowered_prefix:
-                    reasons.append(
-                        "llm_frustrated_distractor_context prefix reused clean quoted "
-                        f"literal: {quoted!r}"
-                    )
-            for literal in primitive_gold_values(example["ground_truth"]):
-                if (
-                    isinstance(literal, str)
-                    and literal_visible_in_text(literal, clean_prompt)
-                    and literal_visible_in_text(literal, prefix_text)
-                ):
-                    reasons.append(
-                        "llm_frustrated_distractor_context prefix reused visible gold "
-                        f"literal: {literal!r}"
-                    )
+    return reasons
 
+
+def conversation_validation_errors(
+    messages: list[dict[str, str]], dimension: LlmDimension, final_user_message: str
+) -> list[str]:
+    reasons = []
     if not messages:
         reasons.append("augmentation returned no messages")
     elif messages[-1]["role"] != "user":
@@ -666,7 +693,10 @@ def validate_llm_messages(
                 "llm_messy_pre_intent_history must contain 5-9 messages before "
                 "the appended final request"
             )
+    return reasons
 
+
+def meta_language_validation_errors(clean_prompt: str, augmented_text: str) -> list[str]:
     meta_terms = (
         "bfcl",
         "benchmark",
@@ -679,9 +709,36 @@ def validate_llm_messages(
         "function call",
         "augmentation",
     )
-    for term in meta_terms:
-        if term in lowered_text and term not in lowered_clean:
-            reasons.append(f"benchmark meta-language leaked into prompt: {term!r}")
+    lowered_text = augmented_text.lower()
+    lowered_clean = clean_prompt.lower()
+    return [
+        f"benchmark meta-language leaked into prompt: {term!r}"
+        for term in meta_terms
+        if term in lowered_text and term not in lowered_clean
+    ]
+
+
+def validate_llm_messages(
+    example: dict[str, object],
+    messages: list[dict[str, str]],
+    dimension: LlmDimension,
+) -> list[str]:
+    clean_prompt = conversation_text(example["question"])
+    final_user_message = final_clean_user_message(example)
+    augmented_text = "\n".join(message["content"] for message in messages)
+    reasons = preservation_validation_errors(example, clean_prompt, augmented_text)
+    reasons.extend(
+        dimension_validation_errors(
+            example,
+            messages,
+            dimension,
+            clean_prompt,
+            augmented_text,
+            final_user_message,
+        )
+    )
+    reasons.extend(conversation_validation_errors(messages, dimension, final_user_message))
+    reasons.extend(meta_language_validation_errors(clean_prompt, augmented_text))
 
     return reasons
 

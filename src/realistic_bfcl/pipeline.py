@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -250,6 +251,13 @@ def main(argv: list[str] | None = None) -> None:
         selected_models = [item.strip() for item in args.models.split(",") if item.strip()]
         if not selected_models:
             parser.error("--models must contain at least one model name or id")
+    if (
+        args.stage == "run-bfcl"
+        and not args.dry_run
+        and not selected_models
+        and not os.environ.get("REALISTIC_BFCL_MODELS")
+    ):
+        parser.error("run-bfcl requires --models or REALISTIC_BFCL_MODELS")
 
     if args.env_file and args.stage != "run-bfcl":
         parser.error("--env-file is only valid for the run-bfcl stage")

@@ -204,8 +204,8 @@ make status
 make lint
 make prepare-subset
 make augment
-make run-bfcl
-make analyze
+make run-bfcl MODELS=nano,haiku,glm
+make analyze MANIFEST=artifacts/<run_id>/manifest.json
 ```
 
 `prepare-subset` freezes the BFCL substrate and materializes the configured
@@ -303,11 +303,12 @@ python scripts/run_stage.py run-bfcl --dry-run
 ```
 
 `prepare-subset` expects access to a checkout of the pinned BFCL upstream repository.
-Set `REALISTIC_BFCL_BFCL_ROOT=/path/to/gorilla` when the checkout is not in the
-default local inspection path.
+Set `REALISTIC_BFCL_BFCL_ROOT=/path/to/gorilla`; there is no machine-specific
+fallback path.
 
-`run-bfcl` runs `oracle_replay` and the models listed in
-`configs/project.yaml`. API-key resolution is explicit: `--env-file` takes
+`run-bfcl` runs `oracle_replay` and only the models selected with `--models` or
+`REALISTIC_BFCL_MODELS`; the registry is `configs/models.yaml`. API-key
+resolution is explicit: `--env-file` takes
 precedence over `REALISTIC_BFCL_ENV_FILE=/path/to/.env`, which takes precedence
 over provider keys in the process environment. No repository or sibling `.env`
 file is loaded implicitly.

@@ -139,6 +139,18 @@ def test_cli_env_file_is_only_accepted_for_run_bfcl(
         pipeline.main(["analyze", "--env-file", str(env_file)])
 
 
+def test_cli_requires_explicit_model_selection(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("REALISTIC_BFCL_MODELS", raising=False)
+
+    with pytest.raises(SystemExit):
+        pipeline.main(["run-bfcl"])
+    assert "requires --models" in capsys.readouterr().err
+
+    pipeline.main(["run-bfcl", "--dry-run"])
+
+
 def test_explicit_env_state_is_cleared_after_failed_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
