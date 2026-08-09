@@ -65,6 +65,18 @@ reason for every implemented dimension live in
 Drop values are absolute percentage-point drops (`pp`), not relative percent
 change.
 
+![Per-dimension degradation with 95% paired bootstrap intervals](figures/degradation_by_dimension.png)
+
+*Figure 1. Clean-minus-noisy accuracy by model and dimension. Intervals are 95%
+paired bootstrap CIs; filled points pass Holm correction within model, hollow
+points do not, and zero denotes no directional change.*
+
+![Paired discordant outcomes by model and dimension](figures/discordance_decomposition.png)
+
+*Figure 2. Paired discordance decomposition. Regressions are clean-correct to
+noisy-wrong transitions; recoveries are the reverse. Similar counts indicate
+added variance, whereas excess regressions indicate directional degradation.*
+
 | Model | Provider | Tier | Clean acc. | Avg noisy acc. | Avg drop |
 |---|---|---|---:|---:|---:|
 | `gpt-5.4-nano` | OpenAI | cheap | 76.1% | 74.9% | 1.2 pp |

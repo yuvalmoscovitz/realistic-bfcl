@@ -1,4 +1,4 @@
-.PHONY: status lint typecheck prepare-subset augment run-bfcl analyze
+.PHONY: status lint typecheck prepare-subset augment run-bfcl analyze plots
 
 PYTHON ?= python
 RUN_STAGE = $(PYTHON) scripts/run_stage.py
@@ -23,3 +23,6 @@ run-bfcl:
 
 analyze:
 	$(RUN_STAGE) analyze
+
+plots:
+	$(PYTHON) plots.py
