@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from realistic_bfcl import evaluate
-from realistic_bfcl.common import article_primary_model, configured_model_runs, model_registry
+from realistic_bfcl.common import (
+    article_primary_model,
+    configured_model_runs,
+    model_registry,
+    read_int_setting,
+    read_list_setting,
+)
 from realistic_bfcl.evaluate import (
     estimated_cost_usd,
     estimated_invocation_cost_usd,
@@ -29,6 +36,30 @@ def test_model_selection_accepts_names_and_ids(monkeypatch: pytest.MonkeyPatch) 
     models = configured_model_runs(["haiku", "gpt-5.4-nano"])
 
     assert [model.name for model in models] == ["haiku", "nano"]
+
+
+def test_subset_settings_are_loaded_from_yaml(tmp_path: Path) -> None:
+    config = tmp_path / "subset.yaml"
+    config.write_text(
+        "subset:\n  max_examples: 12\n  bfcl_categories: [simple_python, multiple]\n",
+        encoding="utf-8",
+    )
+
+    assert read_int_setting(config, "max_examples") == 12
+    assert read_list_setting(config, "bfcl_categories") == ["simple_python", "multiple"]
+
+
+def test_subset_settings_reject_wrong_types(tmp_path: Path) -> None:
+    config = tmp_path / "subset.yaml"
+    config.write_text(
+        "subset:\n  max_examples: 0\n  bfcl_categories: simple_python\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit, match="positive integer"):
+        read_int_setting(config, "max_examples")
+    with pytest.raises(SystemExit, match="list of strings"):
+        read_list_setting(config, "bfcl_categories")
 
 
 def test_model_selection_fails_loudly_for_unknown_model(

@@ -251,7 +251,7 @@ def argument_value_issue_kind(gold: object, noisy_prediction: object) -> str:
         return "real"
 
     saw_alias_or_format = False
-    for expected, predicted in zip(gold_args, predicted_args):
+    for expected, predicted in zip(gold_args, predicted_args, strict=True):
         for key, accepted in expected.items():
             if key not in predicted:
                 return "real"
@@ -288,7 +288,7 @@ def has_baseline_dataset_ambiguity(
         return False
 
     saw_percent_scale_issue = False
-    for expected, predicted in zip(gold_args, predicted_args):
+    for expected, predicted in zip(gold_args, predicted_args, strict=True):
         for key, accepted in expected.items():
             if key not in predicted:
                 return False
@@ -317,6 +317,67 @@ def augmentation_text_copied_into_argument(
     return any(len(token) >= 5 and token in argument_text for token in introduced_tokens)
 
 
+def call_count_label(noisy_names: list[str], expected_names: list[str]) -> tuple[str, str]:
+    if len(noisy_names) < len(expected_names):
+        return "missing_tool_call", "Noisy prediction emits fewer calls than the gold oracle."
+    if len(noisy_names) > len(expected_names):
+        return "extra_tool_call", "Noisy prediction emits more calls than the gold oracle."
+    return "call_count_mismatch", "Noisy prediction call count differs from the gold oracle."
+
+
+def argument_value_label(
+    review: dict[str, object], gold: object, noisy_prediction: object
+) -> tuple[str, str, str, str, str]:
+    dimension = str(review["dimension"])
+    clean_prompt = str(review["clean_prompt"])
+    noisy_prompt = str(review["noisy_prompt"])
+    if dimension == "removed_spaces" and augmentation_text_copied_into_argument(
+        clean_prompt, noisy_prompt, noisy_prediction
+    ):
+        return (
+            "augmentation_text_copied_into_argument_value",
+            "no",
+            "possible",
+            "no",
+            "The removed-space artifact appears to have been copied into an argument value.",
+        )
+    if dimension == "typos" and typo_copied_into_argument(
+        clean_prompt, noisy_prompt, noisy_prediction
+    ):
+        return (
+            "typo_copied_into_argument_value",
+            "no",
+            "possible",
+            "no",
+            "The typo appears to have been copied into an argument value.",
+        )
+    if has_baseline_dataset_ambiguity(clean_prompt, noisy_prompt, gold, noisy_prediction):
+        return (
+            "baseline_dataset_ambiguity",
+            "no",
+            "no",
+            "possible",
+            "The BFCL prompt and schema appear ambiguous relative to the gold argument convention.",
+        )
+    if likely_alias_or_normalization_issue(gold, noisy_prediction):
+        return (
+            "entity_or_alias_normalization_mismatch",
+            "possible",
+            "no",
+            "no",
+            "Noisy prediction appears semantically close but uses a different "
+            "alias or formatting than accepted gold.",
+        )
+    return (
+        "wrong_argument_value",
+        "no",
+        "no",
+        "no",
+        "Noisy prediction uses the right tool and call count, but at least "
+        "one argument value differs.",
+    )
+
+
 def regression_label(review: dict[str, object]) -> dict[str, str]:
     gold = parsed_json_value(review["gold"])
     noisy_prediction = parsed_json_value(review["noisy_prediction"])
@@ -328,60 +389,18 @@ def regression_label(review: dict[str, object]) -> dict[str, str]:
     baseline_dataset_issue = "no"
 
     if heuristic == "call_count_mismatch":
-        if len(noisy_names) < len(expected_names):
-            manual_error_type = "missing_tool_call"
-            notes = "Noisy prediction emits fewer calls than the gold oracle."
-        elif len(noisy_names) > len(expected_names):
-            manual_error_type = "extra_tool_call"
-            notes = "Noisy prediction emits more calls than the gold oracle."
-        else:
-            manual_error_type = "call_count_mismatch"
-            notes = "Noisy prediction call count differs from the gold oracle."
+        manual_error_type, notes = call_count_label(noisy_names, expected_names)
     elif heuristic == "routing_error":
         manual_error_type = "wrong_tool_routing"
         notes = "Noisy prediction calls a different tool than the gold oracle."
     elif heuristic == "argument_value_error":
-        if str(review["dimension"]) == "removed_spaces" and augmentation_text_copied_into_argument(
-            str(review["clean_prompt"]),
-            str(review["noisy_prompt"]),
-            noisy_prediction,
-        ):
-            manual_error_type = "augmentation_text_copied_into_argument_value"
-            augmentation_issue = "possible"
-            notes = "The removed-space artifact appears to have been copied into an argument value."
-        elif str(review["dimension"]) == "typos" and typo_copied_into_argument(
-            str(review["clean_prompt"]),
-            str(review["noisy_prompt"]),
-            noisy_prediction,
-        ):
-            manual_error_type = "typo_copied_into_argument_value"
-            augmentation_issue = "possible"
-            notes = "The typo appears to have been copied into an argument value."
-        elif has_baseline_dataset_ambiguity(
-            str(review["clean_prompt"]),
-            str(review["noisy_prompt"]),
-            gold,
-            noisy_prediction,
-        ):
-            manual_error_type = "baseline_dataset_ambiguity"
-            baseline_dataset_issue = "possible"
-            notes = (
-                "The BFCL prompt and schema appear ambiguous relative to the gold "
-                "argument convention."
-            )
-        elif likely_alias_or_normalization_issue(gold, noisy_prediction):
-            manual_error_type = "entity_or_alias_normalization_mismatch"
-            oracle_issue = "possible"
-            notes = (
-                "Noisy prediction appears semantically close but uses a different "
-                "alias or formatting than accepted gold."
-            )
-        else:
-            manual_error_type = "wrong_argument_value"
-            notes = (
-                "Noisy prediction uses the right tool and call count, but at least "
-                "one argument value differs."
-            )
+        (
+            manual_error_type,
+            oracle_issue,
+            augmentation_issue,
+            baseline_dataset_issue,
+            notes,
+        ) = argument_value_label(review, gold, noisy_prediction)
     elif heuristic == "argument_drop":
         manual_error_type = "argument_drop"
         notes = "Noisy prediction omits an argument required by the gold oracle."

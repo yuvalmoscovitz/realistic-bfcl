@@ -6,7 +6,6 @@ import importlib
 import json
 import os
 import re
-import socket
 import sys
 import time
 import types
@@ -52,6 +51,7 @@ from .common import (
 from .run_manifest import (
     MANIFEST_SCHEMA_VERSION,
     atomic_write_json,
+    bfcl_checkout_root,
     build_run_provenance,
     frozen_dataset_provenance,
     result_files,
@@ -61,31 +61,11 @@ CACHE_SCHEMA_VERSION = 1
 
 
 def bfcl_data_root() -> Path:
-    root = os.environ.get("REALISTIC_BFCL_BFCL_ROOT")
-    if root:
-        return Path(root) / "berkeley-function-call-leaderboard/bfcl_eval/data"
-    default_root = Path(
-        "/tmp/gorilla-bfcl-inspect/berkeley-function-call-leaderboard/bfcl_eval/data"
-    )
-    if default_root.exists():
-        return default_root
-    raise SystemExit(
-        "Set REALISTIC_BFCL_BFCL_ROOT to a checkout of "
-        "https://github.com/ShishirPatil/gorilla at the pinned commit."
-    )
+    return bfcl_eval_root() / "bfcl_eval/data"
 
 
 def bfcl_eval_root() -> Path:
-    root = os.environ.get("REALISTIC_BFCL_BFCL_ROOT")
-    if root:
-        return Path(root) / "berkeley-function-call-leaderboard"
-    default_root = Path("/tmp/gorilla-bfcl-inspect/berkeley-function-call-leaderboard")
-    if default_root.exists():
-        return default_root
-    raise SystemExit(
-        "Set REALISTIC_BFCL_BFCL_ROOT to a checkout of "
-        "https://github.com/ShishirPatil/gorilla at the pinned commit."
-    )
+    return bfcl_checkout_root() / "berkeley-function-call-leaderboard"
 
 
 def materialize_subset(subset_config: Path, manifest_path: Path) -> Path:
@@ -186,15 +166,39 @@ def anthropic_safe_property_name(name: str, used_names: set[str]) -> str:
     return candidate
 
 
+def anthropic_safe_properties(
+    properties: dict[object, object],
+) -> tuple[dict[str, object], dict[str, str], dict[str, object], dict[str, str]]:
+    converted: dict[str, object] = {}
+    property_map: dict[str, str] = {}
+    child_maps: dict[str, object] = {}
+    required_key_map: dict[str, str] = {}
+    used_names: set[str] = set()
+    for property_name, property_schema in properties.items():
+        original_name = str(property_name)
+        safe_name = anthropic_safe_property_name(original_name, used_names)
+        converted_schema, child_map = anthropic_safe_schema(property_schema)
+        converted[safe_name] = converted_schema
+        required_key_map[original_name] = safe_name
+        property_map[safe_name] = original_name
+        if child_map:
+            child_maps[safe_name] = child_map
+    return converted, property_map, child_maps, required_key_map
+
+
+def anthropic_safe_sequence(values: list[object]) -> tuple[list[object], dict[str, object]]:
+    converted_items = []
+    item_maps = []
+    for item in values:
+        converted_item, item_map = anthropic_safe_schema(item)
+        converted_items.append(converted_item)
+        item_maps.append(item_map)
+    return converted_items, {"items": item_maps}
+
+
 def anthropic_safe_schema(value: object) -> tuple[object, dict[str, object]]:
     if isinstance(value, list):
-        converted_items = []
-        item_maps = []
-        for item in value:
-            converted_item, item_map = anthropic_safe_schema(item)
-            converted_items.append(converted_item)
-            item_maps.append(item_map)
-        return converted_items, {"items": item_maps}
+        return anthropic_safe_sequence(value)
 
     if not isinstance(value, dict):
         return value, {}
@@ -206,17 +210,11 @@ def anthropic_safe_schema(value: object) -> tuple[object, dict[str, object]]:
 
     for key, child in value.items():
         if key == "properties" and isinstance(child, dict):
-            current_key_map = {}
-            converted_properties: dict[str, object] = {}
-            used_names: set[str] = set()
-            for property_name, property_schema in child.items():
-                safe_name = anthropic_safe_property_name(str(property_name), used_names)
-                converted_property_schema, child_map = anthropic_safe_schema(property_schema)
-                converted_properties[safe_name] = converted_property_schema
-                current_key_map[str(property_name)] = safe_name
-                property_map[safe_name] = str(property_name)
-                if child_map:
-                    child_maps[safe_name] = child_map
+            converted_properties, new_property_map, new_child_maps, current_key_map = (
+                anthropic_safe_properties(child)
+            )
+            property_map.update(new_property_map)
+            child_maps.update(new_child_maps)
             converted[key] = converted_properties
             continue
         if key == "required" and isinstance(child, list):
@@ -341,7 +339,6 @@ def openai_retry_json(payload: dict[str, object], api_key: str) -> dict[str, obj
             raise RuntimeError(f"OpenAI API request failed: HTTP {error.code}: {body}") from error
         except (
             TimeoutError,
-            socket.timeout,
             urllib.error.URLError,
             http.client.RemoteDisconnected,
             ConnectionError,
@@ -403,7 +400,6 @@ def chat_completion_retry_json(
             ) from error
         except (
             TimeoutError,
-            socket.timeout,
             urllib.error.URLError,
             http.client.RemoteDisconnected,
             ConnectionError,
@@ -462,7 +458,7 @@ def anthropic_request_text(
             raise RuntimeError(
                 f"Anthropic API request failed: HTTP {error.code}: {body}"
             ) from error
-        except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+        except (TimeoutError, urllib.error.URLError) as error:
             if attempt < OPENAI_MAX_ATTEMPTS:
                 time.sleep(min(60, 2**attempt))
                 continue

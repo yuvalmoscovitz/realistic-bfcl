@@ -15,6 +15,15 @@ def write(path: Path, contents: str) -> Path:
     return path
 
 
+def test_bfcl_checkout_requires_explicit_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("REALISTIC_BFCL_BFCL_ROOT", raising=False)
+
+    with pytest.raises(SystemExit, match="REALISTIC_BFCL_BFCL_ROOT"):
+        run_manifest.bfcl_checkout_root()
+
+
 def valid_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(run_manifest, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(run_manifest, "git_sha", lambda repository: "a" * 40)

@@ -7,17 +7,18 @@ name = "realistic-bfcl"
 version = "0.1.0"
 description = "Realism-controlled metamorphic benchmark layer over BFCL."
 readme = "README.md"
-requires-python = ">=3.8"
-license = { text = "MIT" }
-dependencies = ["numpy>=1.24,<2", "PyYAML>=6.0"]
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["numpy>=1.24,<3", "PyYAML>=6.0"]
 
 [project.optional-dependencies]
 dev = [
-    "matplotlib>=3.7.5,<3.8",
-    "mypy>=1.11,<1.17",
+    "matplotlib>=3.10,<3.12",
+    "mypy>=2.3,<3",
     "pre-commit>=3.5,<5",
     "pytest>=7.4",
     "ruff>=0.8",
+    "types-PyYAML>=6.0.12",
 ]
 
 [tool.setuptools.packages.find]
@@ -26,10 +27,10 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 src = ["scripts", "src"]
-target-version = "py38"
+target-version = "py311"
 
 [tool.ruff.lint]
-select = ["B", "E", "F", "I", "UP"]
+select = ["B", "C90", "E", "F", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/run_stage.py" = ["E402", "I001"]
@@ -39,4 +40,4 @@ indent-style = "space"
 quote-style = "double"
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.11"

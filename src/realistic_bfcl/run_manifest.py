@@ -9,7 +9,6 @@ import tempfile
 from pathlib import Path
 
 import numpy
-import yaml
 
 from . import __version__
 from .common import (
@@ -19,6 +18,7 @@ from .common import (
     ModelRun,
     configured_model_runs,
     file_sha256,
+    load_yaml_mapping,
 )
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -67,8 +67,12 @@ def git_dirty(repository: Path) -> bool:
 
 
 def bfcl_checkout_root() -> Path:
-    configured = os.environ.get("REALISTIC_BFCL_BFCL_ROOT")
-    return Path(configured) if configured else Path("/tmp/gorilla-bfcl-inspect")
+    configured = os.environ.get("REALISTIC_BFCL_BFCL_ROOT", "").strip()
+    if not configured:
+        raise SystemExit(
+            "Set REALISTIC_BFCL_BFCL_ROOT to the pinned BFCL repository checkout."
+        )
+    return Path(configured).expanduser().resolve()
 
 
 def verified_bfcl_metadata() -> dict[str, object]:
@@ -93,15 +97,11 @@ def verified_bfcl_metadata() -> dict[str, object]:
 
 
 def runtime_versions() -> dict[str, str]:
-    try:
-        pyyaml_version = importlib.metadata.version("PyYAML")
-    except importlib.metadata.PackageNotFoundError:
-        pyyaml_version = yaml.__version__
     return {
         "python": platform.python_version(),
         "realistic_bfcl": __version__,
         "numpy": numpy.__version__,
-        "pyyaml": pyyaml_version,
+        "pyyaml": importlib.metadata.version("PyYAML"),
     }
 
 
@@ -130,9 +130,15 @@ def subset_config_metadata() -> dict[str, object]:
     if not config_path.exists():
         raise SystemExit(f"Subset config is missing: {clean_subset['config_path']}")
     try:
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        seed = config["subset"]["selection"]["seed"]
-    except (OSError, TypeError, KeyError, yaml.YAMLError) as error:
+        config = load_yaml_mapping(config_path)
+        subset = config["subset"]
+        if not isinstance(subset, dict):
+            raise TypeError("subset must be a mapping")
+        selection = subset["selection"]
+        if not isinstance(selection, dict):
+            raise TypeError("selection must be a mapping")
+        seed = selection["seed"]
+    except (TypeError, KeyError) as error:
         raise SystemExit(
             f"Subset config is missing subset.selection.seed: {config_path}"
         ) from error
@@ -224,18 +230,17 @@ def canonical_result_path(model: ModelRun, dimension: str, kind: str, suffix: st
     return (result_dir / f"{model.filename}_{extension}").as_posix()
 
 
-def load_validated_manifest(explicit_path: Path | None = None) -> dict[str, object]:
-    if explicit_path is None:
-        raise SystemExit("Analyze requires --run-manifest with a completed evaluation manifest.")
-    path = repository_path(str(explicit_path))
-    if not path.exists():
-        raise SystemExit(f"Run manifest does not exist: {path}")
+def read_manifest(path: Path) -> dict[str, object]:
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise SystemExit(f"Invalid run manifest {path}: {error}") from error
     if not isinstance(manifest, dict):
         raise SystemExit(f"Invalid run manifest {path}: expected a JSON object.")
+    return manifest
+
+
+def validate_manifest_header(manifest: dict[str, object], path: Path) -> None:
     if manifest.get("schema_version") != MANIFEST_SCHEMA_VERSION:
         raise SystemExit(f"Unsupported run manifest schema in {path}.")
     if manifest.get("status") != "complete":
@@ -251,6 +256,8 @@ def load_validated_manifest(explicit_path: Path | None = None) -> dict[str, obje
     ):
         raise SystemExit("Run manifest is missing relevant library versions.")
 
+
+def validate_repository_provenance(manifest: dict[str, object]) -> None:
     repository = manifest.get("repository")
     if (
         not isinstance(repository, dict)
@@ -268,6 +275,8 @@ def load_validated_manifest(explicit_path: Path | None = None) -> dict[str, obje
     ):
         raise SystemExit("Run manifest BFCL SHA is missing or inconsistent with the pinned SHA.")
 
+
+def validate_config_provenance(manifest: dict[str, object]) -> dict[str, object]:
     configs = manifest.get("configs")
     if not isinstance(configs, dict):
         raise SystemExit("Run manifest is missing config provenance.")
@@ -281,7 +290,10 @@ def load_validated_manifest(explicit_path: Path | None = None) -> dict[str, obje
     subset_record = configs["subset"]
     if not isinstance(subset_record.get("selection_seed"), int):
         raise SystemExit("Run manifest is missing the subset selection seed.")
+    return configs
 
+
+def validate_frozen_provenance(manifest: dict[str, object]) -> dict[str, object]:
     frozen = manifest.get("frozen_dataset")
     if not isinstance(frozen, dict):
         raise SystemExit("Run manifest is missing frozen-dataset provenance.")
@@ -297,21 +309,26 @@ def load_validated_manifest(explicit_path: Path | None = None) -> dict[str, obje
         generated_path = REPO_ROOT / "artifacts/generated" / DIMENSION_FILES[dimension]
         if not generated_path.exists() or expected_hash != file_sha256(generated_path):
             raise SystemExit(f"Run manifest dimension hash does not match: {dimension}")
+    return dimension_hashes
 
+
+def validate_model_provenance(manifest: dict[str, object]) -> dict[str, ModelRun]:
     models = manifest.get("models")
     if not isinstance(models, list) or not models:
         raise SystemExit("Run manifest does not contain any evaluated models.")
-    model_ids = {
-        record.get("id") for record in models if isinstance(record, dict) and record.get("id")
-    }
-    if len(model_ids) != len(models):
-        raise SystemExit("Run manifest contains invalid or duplicate model records.")
-    if any(
-        not isinstance(record, dict) or not isinstance(record.get("sampling"), dict)
-        for record in models
-    ):
-        raise SystemExit("Run manifest is missing model sampling parameters.")
-    configured_models = {model.id: model for model in configured_model_runs(list(model_ids))}
+    model_ids: list[str] = []
+    for record in models:
+        if (
+            not isinstance(record, dict)
+            or not isinstance(record.get("id"), str)
+            or not record["id"]
+            or not isinstance(record.get("sampling"), dict)
+        ):
+            raise SystemExit("Run manifest contains an invalid model record.")
+        model_ids.append(record["id"])
+    if len(set(model_ids)) != len(models):
+        raise SystemExit("Run manifest contains duplicate model records.")
+    configured_models = {model.id: model for model in configured_model_runs(model_ids)}
     for record in models:
         configured = configured_models[str(record["id"])]
         if (
@@ -328,33 +345,69 @@ def load_validated_manifest(explicit_path: Path | None = None) -> dict[str, obje
             raise SystemExit(f"Run manifest is missing OpenRouter routing: {configured.id}")
         if configured.provider != "openrouter" and routing is not None:
             raise SystemExit(f"Run manifest has unexpected OpenRouter routing: {configured.id}")
+    return configured_models
 
+
+def expected_result_paths(
+    configured_models: dict[str, ModelRun], dimension_hashes: dict[str, object]
+) -> dict[tuple[str, str, str], str]:
+    return {
+        (kind, model_id, dimension): canonical_result_path(model, dimension, kind, "")
+        for model_id, model in configured_models.items()
+        for dimension in dimension_hashes
+        for kind in ("paired", "summary")
+    }
+
+
+def validate_result_record(
+    record: object,
+    expected_paths: dict[tuple[str, str, str], str],
+    seen: set[tuple[object, object, object]],
+) -> None:
+    if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+        raise SystemExit("Run manifest contains an invalid result-file record.")
+    key = (record.get("kind"), record.get("model"), record.get("dimension"))
+    if key in seen or key not in expected_paths or record["path"] != expected_paths[key]:
+        raise SystemExit("Run manifest result-file set is incomplete or inconsistent.")
+    seen.add(key)
+    result_path = repository_path(record["path"])
+    if not result_path.exists() or record.get("sha256") != file_sha256(result_path):
+        raise SystemExit(f"Run manifest result hash does not match: {record['path']}")
+
+
+def validate_result_provenance(
+    manifest: dict[str, object],
+    configured_models: dict[str, ModelRun],
+    dimension_hashes: dict[str, object],
+) -> None:
     results = manifest.get("results")
     if not isinstance(results, dict) or not isinstance(results.get("files"), list):
         raise SystemExit("Run manifest is missing result-file provenance.")
     suffix = results.get("result_suffix")
     if suffix:
         raise SystemExit("Analyze currently requires an unsuffixed run manifest.")
-    expected_paths = {}
-    for model_id, model in configured_models.items():
-        for dimension in dimension_hashes:
-            for kind in ("paired", "summary"):
-                key = (kind, model_id, dimension)
-                expected_paths[key] = canonical_result_path(model, dimension, kind, "")
+    expected_paths = expected_result_paths(configured_models, dimension_hashes)
     files = results["files"]
     if len(files) != len(expected_paths):
         raise SystemExit("Run manifest result-file set is incomplete or inconsistent.")
-    seen = set()
+    seen: set[tuple[object, object, object]] = set()
     for record in files:
-        if not isinstance(record, dict) or not isinstance(record.get("path"), str):
-            raise SystemExit("Run manifest contains an invalid result-file record.")
-        key = (record.get("kind"), record.get("model"), record.get("dimension"))
-        if key in seen or key not in expected_paths or record["path"] != expected_paths[key]:
-            raise SystemExit("Run manifest result-file set is incomplete or inconsistent.")
-        seen.add(key)
-        result_path = repository_path(record["path"])
-        if not result_path.exists() or record.get("sha256") != file_sha256(result_path):
-            raise SystemExit(f"Run manifest result hash does not match: {record['path']}")
+        validate_result_record(record, expected_paths, seen)
     if seen != set(expected_paths):
         raise SystemExit("Run manifest result-file set is incomplete or inconsistent.")
+
+
+def load_validated_manifest(explicit_path: Path | None = None) -> dict[str, object]:
+    if explicit_path is None:
+        raise SystemExit("Analyze requires --run-manifest with a completed evaluation manifest.")
+    path = repository_path(str(explicit_path))
+    if not path.exists():
+        raise SystemExit(f"Run manifest does not exist: {path}")
+    manifest = read_manifest(path)
+    validate_manifest_header(manifest, path)
+    validate_repository_provenance(manifest)
+    validate_config_provenance(manifest)
+    dimension_hashes = validate_frozen_provenance(manifest)
+    configured_models = validate_model_provenance(manifest)
+    validate_result_provenance(manifest, configured_models, dimension_hashes)
     return manifest
