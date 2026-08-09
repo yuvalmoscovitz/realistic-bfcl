@@ -77,6 +77,11 @@ change.
 | `claude-haiku-4-5-20251001` | 2,351 | 83.2% | 82.6% | 0.5 pp |
 | `z-ai/glm-4.6` | 2,351 | 84.5% | 83.6% | 0.9 pp |
 
+![Paired clean-minus-noisy accuracy degradation by model and dimension](docs/figures/degradation_by_dimension.png)
+
+*Absolute accuracy degradation with 95% paired bootstrap intervals; filled
+points are significant after Holm correction.*
+
 These are genuinely three separate model runs, not three labels produced by one
 judge: the checked-in `model_comparison.csv` and paired artifacts identify the
 provider and model on every row. However, none of these three is a frontier-tier
