@@ -123,7 +123,7 @@ STAGES: tuple[Stage, ...] = (
     Stage(
         name="analyze",
         purpose="Compute degradation metrics and error taxonomy.",
-        inputs=("artifacts/results/paired/",),
+        inputs=("artifacts/<run_id>/manifest.json", "artifacts/results/paired/"),
         outputs=(
             "artifacts/analysis/benchmark_summary.csv",
             "artifacts/analysis/benchmark_summary.json",
@@ -136,9 +136,6 @@ STAGES: tuple[Stage, ...] = (
             "artifacts/analysis/article/paired_stats.csv",
             "artifacts/analysis/article/realism_audit_summary.csv",
             "artifacts/analysis/article/review_filtering.csv",
-            "artifacts/analysis/article/stability_repeat_summary.csv",
-            "artifacts/analysis/article/stability_repeat_runs.csv",
-            "artifacts/analysis/article/stability_repeat_summary.json",
         ),
         next_action=(
             "Use adjusted regression metrics to decide whether the pilot is ready to scale."
@@ -177,6 +174,7 @@ def run_stage(
     dry_run: bool,
     models: list[str] | None = None,
     env_file: Path | None = None,
+    run_manifest: Path | None = None,
 ) -> None:
     describe_stage(stage)
     if dry_run:
@@ -201,7 +199,7 @@ def run_stage(
             set_explicit_env_file(None)
         return
     if stage.name == "analyze":
-        analyze()
+        analyze(run_manifest)
         return
     raise SystemExit(f"Stage implementation missing: {stage.name}")
 
@@ -227,6 +225,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Environment file used before REALISTIC_BFCL_ENV_FILE and process variables.",
     )
+    parser.add_argument(
+        "--run-manifest",
+        type=Path,
+        help="Completed run manifest to verify and analyze (required for analyze).",
+    )
     return parser
 
 
@@ -250,12 +253,17 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.env_file and args.stage != "run-bfcl":
         parser.error("--env-file is only valid for the run-bfcl stage")
+    if args.run_manifest and args.stage != "analyze":
+        parser.error("--run-manifest is only valid for the analyze stage")
+    if args.stage == "analyze" and not args.run_manifest and not args.dry_run:
+        parser.error("analyze requires --run-manifest")
 
     run_stage(
         stage_by_name(args.stage),
         dry_run=args.dry_run,
         models=selected_models,
         env_file=args.env_file,
+        run_manifest=args.run_manifest,
     )
 
 

@@ -268,9 +268,15 @@ make run-bfcl MODELS=nano,haiku,frontier
 python scripts/run_stage.py run-bfcl --models nano --env-file /path/to/.env
 ```
 
-Every completed invocation writes `artifacts/<run_id>/manifest.json` with the
-selected model configs, frozen-dataset hashes, token usage, estimated per-model
-cost, and wall-clock time.
+After CLI and configuration preflight, each evaluation run writes an atomic
+`artifacts/<run_id>/manifest.json`. Completed runs bind clean repository/BFCL
+SHAs, configs, inputs, models, results, usage, cost, and timing; failed setup or
+evaluation runs retain the metadata available at failure. Analysis requires a
+completed manifest and rejects inconsistent provenance:
+
+```bash
+python scripts/run_stage.py analyze --run-manifest artifacts/<run_id>/manifest.json
+```
 
 `analyze` writes paired degradation metrics and review files under
 `artifacts/analysis/`, including raw and adjusted degradation plus

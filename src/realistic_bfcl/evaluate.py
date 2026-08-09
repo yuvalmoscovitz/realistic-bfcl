@@ -49,6 +49,13 @@ from .common import (
     write_jsonl,
     xai_api_key,
 )
+from .run_manifest import (
+    MANIFEST_SCHEMA_VERSION,
+    atomic_write_json,
+    build_run_provenance,
+    frozen_dataset_provenance,
+    result_files,
+)
 
 
 def bfcl_data_root() -> Path:
@@ -1569,65 +1576,117 @@ def paired_eval(models: list[ModelRun]) -> dict[str, dict[str, object]]:
     return model_run_metrics
 
 
+def model_execution_metadata(model: ModelRun) -> dict[str, object]:
+    return {
+        "execution_backend": "anthropic_batch" if use_batch_backend(model) else "synchronous",
+        "openrouter_routing": (
+            openrouter_provider_routing(model) if model.provider == "openrouter" else None
+        ),
+    }
+
+
 def run_bfcl(selected_models: list[str] | None = None) -> None:
     models = configured_model_runs(selected_models)
     started_at = utc_now()
     run_started = time.perf_counter()
-    clean_metrics = clean_baseline(models)
-    noisy_metrics = paired_eval(models)
     run_id = (
         f"run-{started_at.replace(':', '').replace('+', '_')}-"
         f"{time.time_ns() % 1_000_000_000:09d}"
     )
-    model_metrics = []
-    for model in models:
-        clean = clean_metrics[model.id]
-        noisy = noisy_metrics[model.id]
-        usage = merge_usage(clean["usage"], noisy["usage"])
-        usage_by_execution = merge_usage_by_execution(
-            clean["usage_by_execution"], noisy["usage_by_execution"]
-        )
-        model_metrics.append(
+    manifest_path = REPO_ROOT / "artifacts" / run_id / "manifest.json"
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "status": "running",
+        "run_id": run_id,
+        "started_at": started_at,
+        "models": [
             {
                 "name": model.name,
                 "id": model.id,
                 "provider": model.provider,
                 "tier": model.tier,
                 "sampling": model.sampling_parameters,
-                "usage": usage,
-                "usage_by_execution": usage_by_execution,
-                "api_calls": int(clean["api_calls"]) + int(noisy["api_calls"]),
-                "cache_hits": int(clean["cache_hits"]) + int(noisy["cache_hits"]),
-                "estimated_cost_usd": estimated_invocation_cost_usd(
-                    model, usage_by_execution
-                ),
-                "cost_basis": "provider_reported_or_configured_by_execution",
-                "pricing_source": model.pricing_source,
-                "wall_clock_seconds": round(
-                    float(clean["wall_clock_seconds"]) + float(noisy["wall_clock_seconds"]), 3
-                ),
+            }
+            for model in models
+        ],
+    }
+    atomic_write_json(manifest_path, manifest)
+    try:
+        dimensions = generated_dimensions()
+        suffix = result_suffix()
+        frozen_dataset = frozen_dataset_provenance(dimensions)
+        execution = {model.id: model_execution_metadata(model) for model in models}
+        manifest.update(
+            {
+                **build_run_provenance(),
+                "frozen_dataset": frozen_dataset,
+                "models": [
+                    {
+                        **record,
+                        **execution[str(record["id"])],
+                    }
+                    for record in manifest["models"]
+                ],
+                "results": {"result_suffix": suffix, "files": []},
             }
         )
-    manifest_path = REPO_ROOT / "artifacts" / run_id / "manifest.json"
-    write_json(
-        manifest_path,
-        {
-            "run_id": run_id,
-            "started_at": started_at,
-            "completed_at": utc_now(),
-            "wall_clock_seconds": round(time.perf_counter() - run_started, 3),
-            "frozen_dataset": {
-                "clean_subset_sha256": file_sha256(
-                    REPO_ROOT / "artifacts/frozen/clean_subset.jsonl"
-                ),
-                "dimensions": {
-                    dimension: file_sha256(
-                        REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
-                    )
-                    for dimension in generated_dimensions()
+        atomic_write_json(manifest_path, manifest)
+        clean_metrics = clean_baseline(models)
+        noisy_metrics = paired_eval(models)
+        model_metrics = []
+        for model in models:
+            clean = clean_metrics[model.id]
+            noisy = noisy_metrics[model.id]
+            usage = merge_usage(clean["usage"], noisy["usage"])
+            usage_by_execution = merge_usage_by_execution(
+                clean["usage_by_execution"], noisy["usage_by_execution"]
+            )
+            model_metrics.append(
+                {
+                    "name": model.name,
+                    "id": model.id,
+                    "provider": model.provider,
+                    "tier": model.tier,
+                    "sampling": model.sampling_parameters,
+                    **execution[model.id],
+                    "usage": usage,
+                    "usage_by_execution": usage_by_execution,
+                    "api_calls": int(clean["api_calls"]) + int(noisy["api_calls"]),
+                    "cache_hits": int(clean["cache_hits"]) + int(noisy["cache_hits"]),
+                    "estimated_cost_usd": estimated_invocation_cost_usd(
+                        model, usage_by_execution
+                    ),
+                    "cost_basis": "provider_reported_or_configured_by_execution",
+                    "pricing_source": model.pricing_source,
+                    "wall_clock_seconds": round(
+                        float(clean["wall_clock_seconds"])
+                        + float(noisy["wall_clock_seconds"]),
+                        3,
+                    ),
+                }
+            )
+        manifest.update(
+            {
+                "status": "complete",
+                "completed_at": utc_now(),
+                "wall_clock_seconds": round(time.perf_counter() - run_started, 3),
+                "models": model_metrics,
+                "results": {
+                    "result_suffix": suffix,
+                    "files": result_files(models, dimensions, suffix),
                 },
-            },
-            "models": model_metrics,
-        },
-    )
+            }
+        )
+        atomic_write_json(manifest_path, manifest)
+    except BaseException as error:
+        manifest.update(
+            {
+                "status": "failed",
+                "completed_at": utc_now(),
+                "wall_clock_seconds": round(time.perf_counter() - run_started, 3),
+                "failure_type": type(error).__name__,
+            }
+        )
+        atomic_write_json(manifest_path, manifest)
+        raise
     print(f"Wrote {manifest_path.relative_to(REPO_ROOT)}")

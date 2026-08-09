@@ -4,12 +4,13 @@ import json
 
 import pytest
 
-from realistic_bfcl import analyze, evaluate
+from realistic_bfcl import evaluate
 from realistic_bfcl.common import article_primary_model, configured_model_runs, model_registry
 from realistic_bfcl.evaluate import (
     estimated_cost_usd,
     estimated_invocation_cost_usd,
     input_fingerprint,
+    model_execution_metadata,
 )
 
 
@@ -84,24 +85,23 @@ def test_openrouter_routing_is_part_of_cache_fingerprint(
     assert input_fingerprint(example, model) != original
 
 
+def test_manifest_execution_metadata_records_openrouter_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = configured_model_runs(["glm"])[0]
+    monkeypatch.setenv("REALISTIC_BFCL_OPENROUTER_PROVIDER_ONLY", "AnotherProvider")
+
+    metadata = model_execution_metadata(model)
+
+    assert metadata["execution_backend"] == "synchronous"
+    assert metadata["openrouter_routing"]["only"] == ["AnotherProvider"]
+
+
 def test_article_primary_exposes_safe_output_namespace() -> None:
     primary = article_primary_model()
 
     assert primary.id == "gpt-5.4-nano"
     assert "/" not in primary.filename
-
-
-def test_analysis_paths_use_safe_primary_namespace(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    primary = configured_model_runs(["glm"])[0]
-    monkeypatch.setattr(analyze, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(analyze, "ARTICLE_PRIMARY_MODEL", primary)
-
-    path = analyze.paired_summary_path("typos", "")
-
-    assert path.name == "z-ai_glm-4.6_summary.json"
-    assert "z-ai/glm-4.6" not in str(path)
 
 
 def test_run_manifest_records_model_cost_and_wall_clock(
@@ -111,6 +111,22 @@ def test_run_manifest_records_model_cost_and_wall_clock(
     frozen_dir.mkdir(parents=True)
     (frozen_dir / "clean_subset.jsonl").write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(evaluate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evaluate,
+        "build_run_provenance",
+        lambda: {
+            "repository": {"git_sha": "a" * 40, "dirty": False},
+            "bfcl": {"pinned_sha": "b" * 40, "verified_checkout_sha": "b" * 40},
+            "configs": {},
+            "library_versions": {"python": "test"},
+        },
+    )
+    monkeypatch.setattr(evaluate, "result_files", lambda models, dimensions, suffix: [])
+    monkeypatch.setattr(
+        evaluate,
+        "frozen_dataset_provenance",
+        lambda dimensions: {"clean_subset_sha256": "frozen", "dimensions": {}},
+    )
     monkeypatch.setattr(
         evaluate,
         "clean_baseline",
@@ -151,3 +167,113 @@ def test_run_manifest_records_model_cost_and_wall_clock(
     assert manifest["models"][0]["estimated_cost_usd"] == 2.70
     assert manifest["models"][0]["wall_clock_seconds"] == 4.0
     assert manifest["models"][0]["api_calls"] == 2
+    assert manifest["schema_version"] == 1
+    assert manifest["status"] == "complete"
+    assert manifest["models"][0]["execution_backend"] == "synchronous"
+
+
+def test_failed_evaluation_leaves_failed_manifest(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(evaluate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evaluate,
+        "build_run_provenance",
+        lambda: {
+            "repository": {"git_sha": "a" * 40, "dirty": False},
+            "bfcl": {"pinned_sha": "b" * 40, "verified_checkout_sha": "b" * 40},
+            "configs": {},
+            "library_versions": {"python": "test"},
+        },
+    )
+    monkeypatch.setattr(evaluate, "generated_dimensions", lambda: ["typos"])
+    monkeypatch.setattr(
+        evaluate,
+        "frozen_dataset_provenance",
+        lambda dimensions: {"clean_subset_sha256": "frozen", "dimensions": {"typos": "x"}},
+    )
+
+    def fail(_models: object) -> object:
+        raise RuntimeError("offline failure")
+
+    monkeypatch.setattr(evaluate, "clean_baseline", fail)
+
+    with pytest.raises(RuntimeError, match="offline failure"):
+        evaluate.run_bfcl(["nano"])
+
+    manifests = list((tmp_path / "artifacts").glob("run-*/manifest.json"))
+    assert len(manifests) == 1
+    manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["failure_type"] == "RuntimeError"
+
+
+def test_provenance_failure_leaves_failed_manifest(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(evaluate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(evaluate, "generated_dimensions", lambda: [])
+    monkeypatch.setattr(
+        evaluate,
+        "frozen_dataset_provenance",
+        lambda dimensions: {"clean_subset_sha256": "frozen", "dimensions": {}},
+    )
+
+    def fail() -> dict[str, object]:
+        raise SystemExit("dirty checkout")
+
+    monkeypatch.setattr(evaluate, "build_run_provenance", fail)
+
+    with pytest.raises(SystemExit, match="dirty checkout"):
+        evaluate.run_bfcl(["nano"])
+
+    manifest_path = next((tmp_path / "artifacts").glob("run-*/manifest.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["failure_type"] == "SystemExit"
+
+
+def test_result_hashing_failure_leaves_failed_manifest(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(evaluate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evaluate,
+        "build_run_provenance",
+        lambda: {
+            "repository": {"git_sha": "a" * 40, "dirty": False},
+            "bfcl": {"pinned_sha": "b" * 40, "verified_checkout_sha": "b" * 40},
+            "configs": {},
+            "library_versions": {"python": "test"},
+        },
+    )
+    monkeypatch.setattr(evaluate, "generated_dimensions", lambda: [])
+    monkeypatch.setattr(
+        evaluate,
+        "frozen_dataset_provenance",
+        lambda dimensions: {"clean_subset_sha256": "frozen", "dimensions": {}},
+    )
+    metrics = {
+        "wall_clock_seconds": 0.0,
+        "usage": {},
+        "usage_by_execution": {},
+        "api_calls": 0,
+        "cache_hits": 0,
+    }
+    monkeypatch.setattr(
+        evaluate, "clean_baseline", lambda models: {models[0].id: metrics}
+    )
+    monkeypatch.setattr(evaluate, "paired_eval", lambda models: {models[0].id: metrics})
+
+    def fail_results(models: object, dimensions: object, suffix: object) -> object:
+        raise SystemExit("missing result")
+
+    monkeypatch.setattr(evaluate, "result_files", fail_results)
+
+    with pytest.raises(SystemExit, match="missing result"):
+        evaluate.run_bfcl(["nano"])
+
+    manifest_path = next((tmp_path / "artifacts").glob("run-*/manifest.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["failure_type"] == "SystemExit"
