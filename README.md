@@ -1,6 +1,6 @@
 # Realistic-BFCL
 
-[![CI](https://github.com/yuvalmoscovitz/realistic-bfcl/actions/workflows/ci.yml/badge.svg)](https://github.com/yuvalmoscovitz/realistic-bfcl/actions/workflows/ci.yml)
+[![CI](https://github.com/yuvalmoscovitz/realistic-bfcl/actions/workflows/ci.yml/badge.svg)](https://github.com/yuvalmoscovitz/realistic-bfcl/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **Your evals are cleaner than your users.** Clean evals tell you whether your
 agent *can* do the task, they don't tell you whether it *will*.
