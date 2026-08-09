@@ -57,6 +57,8 @@ from .run_manifest import (
     result_files,
 )
 
+CACHE_SCHEMA_VERSION = 1
+
 
 def bfcl_data_root() -> Path:
     root = os.environ.get("REALISTIC_BFCL_BFCL_ROOT")
@@ -242,10 +244,19 @@ def anthropic_safe_schema(value: object) -> tuple[object, dict[str, object]]:
 
 def restore_anthropic_arguments(value: object, schema_map: object) -> object:
     if isinstance(value, list):
-        item_maps = schema_map.get("items", []) if isinstance(schema_map, dict) else []
+        item_maps: object = schema_map.get("items", []) if isinstance(schema_map, dict) else []
+        if not item_maps and isinstance(schema_map, dict):
+            children = schema_map.get("children", {})
+            if isinstance(children, dict):
+                item_maps = children.get("items", {})
+        if isinstance(item_maps, dict) and set(item_maps) == {"items"}:
+            item_maps = item_maps["items"]
         restored_items = []
         for index, item in enumerate(value):
-            item_map = item_maps[index] if index < len(item_maps) else {}
+            if isinstance(item_maps, list):
+                item_map = item_maps[index] if index < len(item_maps) else {}
+            else:
+                item_map = item_maps
             restored_items.append(restore_anthropic_arguments(item, item_map))
         return restored_items
 
@@ -790,8 +801,13 @@ def tool_name_map(example: dict[str, object]) -> dict[str, str]:
 def response_function_calls(
     response: dict[str, object], name_map: dict[str, str]
 ) -> list[dict[str, object]]:
+    output = response.get("output", [])
+    if not isinstance(output, list):
+        raise ValueError("OpenAI response output must be a list.")
     calls = []
-    for item in response.get("output", []):
+    for item in output:
+        if not isinstance(item, dict):
+            raise ValueError("OpenAI response output items must be objects.")
         if item.get("type") != "function_call":
             continue
         try:
@@ -809,8 +825,14 @@ def chat_response_function_calls(
     choices = response.get("choices", [])
     if not isinstance(choices, list) or not choices:
         return []
-    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
-    tool_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
+    if not isinstance(choices[0], dict):
+        raise ValueError("Chat-completion choices must contain objects.")
+    message = choices[0].get("message", {})
+    if not isinstance(message, dict):
+        raise ValueError("Chat-completion message must be an object.")
+    tool_calls = message.get("tool_calls", [])
+    if not isinstance(tool_calls, list):
+        raise ValueError("Chat-completion tool_calls must be a list.")
     calls = []
     for item in tool_calls:
         if not isinstance(item, dict):
@@ -835,7 +857,7 @@ def anthropic_response_function_calls(
     calls = []
     content = response.get("content", [])
     if not isinstance(content, list):
-        return calls
+        raise ValueError("Anthropic response content must be a list.")
     for item in content:
         if not isinstance(item, dict) or item.get("type") != "tool_use":
             continue
@@ -996,6 +1018,7 @@ def input_fingerprint(example: dict[str, object], model: ModelRun) -> str:
     )
     return stable_hash(
         {
+            "cache_schema": CACHE_SCHEMA_VERSION,
             "model": model.id,
             "provider": model.provider,
             "temperature": model.temperature,
@@ -1040,13 +1063,16 @@ def category_metrics(
 def run_or_load_model_predictions(
     examples: list[dict[str, object]], model_predictions_path: Path, model: ModelRun
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
+    require_unique_values(examples, "id", "evaluation examples")
     expected_fingerprints = {
         example["id"]: input_fingerprint(example, model) for example in examples
     }
     if model_predictions_path.exists() and not os.environ.get("REALISTIC_BFCL_FORCE_MODEL_RUN"):
         cached_predictions = {}
         stale_count = 0
-        for prediction in read_jsonl(model_predictions_path):
+        stored_predictions = read_jsonl(model_predictions_path)
+        require_unique_values(stored_predictions, "id", "cached predictions")
+        for prediction in stored_predictions:
             prediction_id = prediction["id"]
             if prediction.get("input_fingerprint") != expected_fingerprints.get(prediction_id):
                 stale_count += 1
@@ -1375,6 +1401,12 @@ def clean_baseline(models: list[ModelRun]) -> dict[str, dict[str, object]]:
 
 
 def paired_metrics(rows: list[dict[str, object]]) -> dict[str, object]:
+    if any(
+        not isinstance(row.get(field), bool)
+        for row in rows
+        for field in ("clean_correct", "noisy_correct")
+    ):
+        raise ValueError("Paired correctness fields must be booleans.")
     total = len(rows)
     clean_correct = sum(1 for row in rows if row["clean_correct"])
     noisy_correct = sum(1 for row in rows if row["noisy_correct"])
@@ -1433,6 +1465,23 @@ def generated_dimensions() -> list[str]:
     return [dimension for dimension in dimensions if dimension in requested_dimensions]
 
 
+def require_unique_values(
+    rows: list[dict[str, object]], key: str, label: str
+) -> None:
+    values = [row.get(key) for row in rows]
+    if any(value is None for value in values):
+        raise SystemExit(f"Missing {key} in {label}.")
+    if len(values) != len(set(values)):
+        raise SystemExit(f"Duplicate {key} in {label}.")
+
+
+def validate_noisy_pairs(rows: list[dict[str, object]], dimension: str) -> None:
+    require_unique_values(rows, "id", f"{dimension} examples")
+    require_unique_values(rows, "base_id", f"{dimension} pairs")
+    if any(row.get("dimension") != dimension for row in rows):
+        raise SystemExit(f"Mismatched dimension in {dimension} examples.")
+
+
 def paired_eval_dimension(dimension: str, model: ModelRun) -> dict[str, object]:
     noisy_path = REPO_ROOT / f"artifacts/generated/{DIMENSION_FILES[dimension]}"
     clean_results_dir = REPO_ROOT / "artifacts/results/clean"
@@ -1460,6 +1509,7 @@ def paired_eval_dimension(dimension: str, model: ModelRun) -> dict[str, object]:
             f"Limiting paired evaluation for {dimension} to {len(noisy_examples)} "
             f"examples under {suffix}"
         )
+    validate_noisy_pairs(noisy_examples, dimension)
     clean_predictions = load_current_clean_predictions(
         clean_predictions_path,
         {str(noisy_example["base_id"]) for noisy_example in noisy_examples},

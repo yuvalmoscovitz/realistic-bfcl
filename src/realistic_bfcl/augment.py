@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import re
+from collections import Counter
 
 from .common import (
     DIMENSION_FILES,
@@ -681,9 +682,11 @@ def validate_augmented_prompt(
             noisy_prompt
         ):
             reasons.append("clean wrapped message is not preserved inside noisy prompt")
-        for number in numeric_tokens(clean_prompt):
-            if number not in noisy_prompt:
-                reasons.append(f"clean numeric token missing from noisy prompt: {number!r}")
+        missing_numbers = Counter(numeric_tokens(clean_prompt)) - Counter(
+            numeric_tokens(noisy_prompt)
+        )
+        for number in missing_numbers.elements():
+            reasons.append(f"clean numeric token missing from noisy prompt: {number!r}")
         for quoted in quoted_literals(clean_prompt):
             if quoted not in noisy_prompt:
                 reasons.append(f"clean quoted literal missing from noisy prompt: {quoted!r}")
